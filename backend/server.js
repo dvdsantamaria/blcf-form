@@ -1,10 +1,11 @@
+// backend/server.js
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import mongoose from "mongoose";
 
-import formRoutes from "./routes/form.js"; // si ya lo tenías
-import uploadRoutes from "./routes/upload.js"; // presigned y register-upload
+import formRoutes from "./routes/form.js"; // asegurate que este archivo también use export default
+import uploadRoutes from "./routes/upload.js";
 
 dotenv.config();
 const app = express();
@@ -18,12 +19,7 @@ app.use(express.urlencoded({ extended: true }));
 if (formRoutes) app.use("/api", formRoutes);
 app.use("/api", uploadRoutes);
 
-// Static opcional si querés servir index.html desde acá
-// import path from "path";
-// const __dirname = process.cwd();
-// app.use(express.static(__dirname)); // sirve index.html en raíz
-
-// DB
+// DB + Server
 mongoose
   .connect(process.env.MONGO_URI, { serverSelectionTimeoutMS: 15000 })
   .then(() => {
