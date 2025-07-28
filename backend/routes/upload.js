@@ -1,9 +1,10 @@
 // routes/upload.js
-const express = require("express");
+import express from "express";
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import Upload from "../models/Upload.js";
+
 const router = express.Router();
-const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
-const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
-const Upload = require("../models/Upload");
 
 const s3 = new S3Client({
   region: process.env.AWS_REGION,
@@ -30,6 +31,7 @@ const extFromMime = (m) =>
     "image/webp": "webp",
     "image/heic": "heic",
   }[m] || "bin");
+
 const sanitize = (s) => String(s).replace(/[^a-z0-9_.-]/gi, "_");
 
 // GET /api/generate-upload-url
@@ -52,7 +54,7 @@ router.get("/generate-upload-url", async (req, res) => {
             ServerSideEncryption: "aws:kms",
             SSEKMSKeyId: process.env.AWS_KMS_KEY_ID,
           }
-        : {}), // si usás KMS
+        : {}),
     });
 
     const url = await getSignedUrl(s3, cmd, { expiresIn: 60 * 5 });
