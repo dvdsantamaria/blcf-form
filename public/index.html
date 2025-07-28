@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>BLCF – Formulario completo</title>
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+    <link
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"
+      rel="stylesheet"
+    />
+    <link href="styles.css" rel="stylesheet" />
+  </head>
+  <body>
+    <div class="form-wrapper">
+      <h1>Grant Application form – BLCF</h1>
+      <br />
+      <form id="grantForm">
+        <!-- Paso 1 -->
+        <div class="step active" id="step1">
+          <div class="mb-3">
+            <label class="form-label">How did you hear about us?</label>
+            <input class="form-control" type="text" name="referral.source" />
+          </div>
+          <br />
+          <h2>Step 1: Child's Details</h2>
+
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label">First Name</label>
+              <input class="form-control" type="text" name="child.firstName" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Last Name</label>
+              <input class="form-control" type="text" name="child.lastName" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Date of Birth</label>
+              <input class="form-control" type="date" name="child.dob" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Age</label>
+              <input class="form-control" type="number" name="child.age" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Gender</label>
+              <select class="form-select" name="child.gender">
+                <option value="">Select</option>
+                <option>Male</option>
+                <option>Female</option>
+                <option>Other</option>
+              </select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Residential Address</label>
+              <input class="form-control" type="text" name="child.address" />
+            </div>
+          </div>
+
+          <div class="row g-3 mt-2">
+            <div class="col-md-6">
+              <label class="form-label">Street and Number</label>
+              <input
+                class="form-control"
+                type="text"
+                name="child.streetNumber"
+              />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Suburb</label>
+              <input class="form-control" type="text" name="child.suburb" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">State</label>
+              <input class="form-control" type="text" name="child.state" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Postcode</label>
+              <input class="form-control" type="text" name="child.postcode" />
+            </div>
+          </div>
+
+          <div class="form-check mt-3">
+            <input
+              class="form-check-input"
+              id="refugee"
+              type="checkbox"
+              name="child.refugee"
+            />
+            <label class="form-check-label" for="refugee"
+              >Is the child a refugee?</label
+            >
+          </div>
+          <div class="form-check">
+            <input
+              class="form-check-input"
+              id="indigenous"
+              type="checkbox"
+              name="child.indigenous"
+            />
+            <label class="form-check-label" for="indigenous">
+              Is the child of Aboriginal or Torres Strait Islander heritage?
+            </label>
+          </div>
+
+          <div class="mt-3">
+            <label class="form-label">Main language spoken at home</label>
+            <input class="form-control" type="text" name="child.mainLanguage" />
+          </div>
+
+          <label class="form-label mt-3">Diagnosis or condition</label>
+          <textarea
+            class="form-control"
+            rows="2"
+            name="child.diagnosis"
+          ></textarea>
+
+          <label class="form-label">Impact on daily life</label>
+          <textarea
+            class="form-control"
+            rows="2"
+            name="child.impactDailyLife"
+          ></textarea>
+
+          <label class="form-label">Current supports</label>
+          <textarea
+            class="form-control"
+            rows="2"
+            name="child.currentSupports"
+          ></textarea>
+
+          <label class="form-label">Impact on family</label>
+          <textarea
+            class="form-control"
+            rows="2"
+            name="child.impactFamily"
+          ></textarea>
+
+          <label class="form-label">Current therapies</label>
+          <textarea
+            class="form-control"
+            rows="2"
+            name="child.currentTherapies"
+          ></textarea>
+        </div>
+
+        <!-- Paso 2 -->
+        <div class="step" id="step2">
+          <h2>Step 2: NDIS and Therapy</h2>
+
+          <label class="form-label"
+            >Is your child an NDIS participant or eligible?</label
+          >
+          <input
+            class="form-control"
+            type="text"
+            name="ndis.participantEligible"
+          />
+
+          <label class="form-label mt-2">If NO, why not?</label>
+          <textarea
+            class="form-control"
+            rows="2"
+            name="ndis.notEligibleReason"
+          ></textarea>
+
+          <label class="form-label mt-2"
+            >Upload latest NDIS communication</label
+          >
+          <input
+            class="form-control"
+            type="file"
+            name="docs.ndisCommunication"
+            accept=".pdf,.jpg,.jpeg,.png,.webp,.heic"
+          />
+
+          <label class="form-label mt-2"
+            >If YES but more support is needed, why?</label
+          >
+          <textarea
+            class="form-control"
+            rows="2"
+            name="ndis.moreSupportWhy"
+          ></textarea>
+
+          <label class="form-label mt-2"
+            >Support letter from health professional</label
+          >
+          <input
+            class="form-control"
+            type="file"
+            name="docs.supportLetterHealthProfessional"
+            accept=".pdf,.jpg,.jpeg,.png,.webp,.heic"
+          />
+
+          <label class="form-label mt-2">Therapy/therapies to be funded</label>
+          <textarea
+            class="form-control"
+            rows="2"
+            name="therapy.toBeFunded"
+          ></textarea>
+
+          <label class="form-label mt-2"
+            >Therapy frequency or equipment required</label
+          >
+          <textarea
+            class="form-control"
+            rows="2"
+            name="therapy.frequencyOrEquipment"
+          ></textarea>
+
+          <label class="form-label mt-2">Child's therapy goals</label>
+          <textarea
+            class="form-control"
+            rows="3"
+            name="therapy.goals"
+          ></textarea>
+
+          <label class="form-label mt-2">Impact if grant is not received</label>
+          <textarea
+            class="form-control"
+            rows="2"
+            name="therapy.noGrantImpact"
+          ></textarea>
+
+          <label class="form-label mt-2">Diagnosis letter</label>
+          <input
+            class="form-control"
+            type="file"
+            name="docs.diagnosisLetter"
+            accept=".pdf,.jpg,.jpeg,.png,.webp,.heic"
+          />
+
+          <label class="form-label mt-2">Additional letter (optional)</label>
+          <input
+            class="form-control"
+            type="file"
+            name="docs.additionalLetterOptional"
+            accept=".pdf,.jpg,.jpeg,.png,.webp,.heic"
+          />
+        </div>
+
+        <!-- Paso 3 -->
+        <div class="step" id="step3">
+          <h2>Step 3: Parent/Carer Information</h2>
+
+          <label class="form-label"
+            >Do both parents/carers live in the same household?</label
+          >
+          <select class="form-select" name="household.sameHousehold">
+            <option value="">Select</option>
+            <option>Yes</option>
+            <option>No</option>
+          </select>
+
+          <h3 class="mt-4">Parent/Carer 1</h3>
+
+          <label class="form-label">Relationship to the child</label>
+          <input
+            class="form-control"
+            type="text"
+            name="parent1.relationshipToChild"
+          />
+
+          <div class="form-check">
+            <input
+              class="form-check-input"
+              id="financial1"
+              type="checkbox"
+              name="parent1.financialResponsible"
+            />
+            <label class="form-check-label" for="financial1"
+              >Financially responsible for the child</label
+            >
+          </div>
+
+          <input
+            class="form-control mt-2"
+            placeholder="First Name"
+            type="text"
+            name="parent1.firstName"
+          />
+          <input
+            class="form-control mt-2"
+            placeholder="Last Name"
+            type="text"
+            name="parent1.lastName"
+          />
+          <input
+            class="form-control mt-2"
+            placeholder="Mobile Number"
+            type="tel"
+            name="parent1.mobile"
+          />
+          <input
+            class="form-control mt-2"
+            placeholder="Email Address"
+            type="email"
+            name="parent1.email"
+          />
+          <input
+            class="form-control mt-2"
+            placeholder="Employment Status"
+            type="text"
+            name="parent1.employmentStatus"
+          />
+          <input
+            class="form-control mt-2"
+            placeholder="Occupation"
+            type="text"
+            name="parent1.occupation"
+          />
+          <input
+            class="form-control mt-2"
+            placeholder="Receiving Centrelink payments?"
+            type="text"
+            name="parent1.centrelinkPayments"
+          />
+          <input
+            class="form-control mt-2"
+            placeholder="Current living arrangements"
+            type="text"
+            name="parent1.livingArrangements"
+          />
+
+          <h3 class="mt-4">Parent/Carer 2 (optional)</h3>
+
+          <input
+            class="form-control mt-2"
+            placeholder="Relationship to the child"
+            type="text"
+            name="parent2.relationshipToChild"
+          />
+          <input
+            class="form-control mt-2"
+            placeholder="First Name"
+            type="text"
+            name="parent2.firstName"
+          />
+          <input
+            class="form-control mt-2"
+            placeholder="Last Name"
+            type="text"
+            name="parent2.lastName"
+          />
+          <input
+            class="form-control mt-2"
+            placeholder="Mobile Number"
+            type="tel"
+            name="parent2.mobile"
+          />
+          <input
+            class="form-control mt-2"
+            placeholder="Email Address"
+            type="email"
+            name="parent2.email"
+          />
+          <input
+            class="form-control mt-2"
+            placeholder="Employment Status"
+            type="text"
+            name="parent2.employmentStatus"
+          />
+          <input
+            class="form-control mt-2"
+            placeholder="Occupation"
+            type="text"
+            name="parent2.occupation"
+          />
+          <input
+            class="form-control mt-2"
+            placeholder="Receiving Centrelink payments?"
+            type="text"
+            name="parent2.centrelinkPayments"
+          />
+          <input
+            class="form-control mt-2"
+            placeholder="Current living arrangements"
+            type="text"
+            name="parent2.livingArrangements"
+          />
+          <input
+            class="form-control mt-2"
+            placeholder="Relationship to Parent/Carer 1"
+            type="text"
+            name="parent2.relationshipToParent1"
+          />
+        </div>
+
+        <!-- Step 4 -->
+        <div class="step" id="step4">
+          <h2>Step 4: Additional Details and Consent</h2>
+
+          <input
+            class="form-control mb-2"
+            placeholder="Number of dependents under 18"
+            type="number"
+            name="dependents.countUnder18"
+          />
+          <input
+            class="form-control mb-2"
+            placeholder="Ages of dependents"
+            type="text"
+            name="dependents.ages"
+          />
+          <input
+            class="form-control mb-2"
+            placeholder="How many with disability?"
+            type="number"
+            name="dependents.withDisabilityCount"
+          />
+          <textarea
+            class="form-control mb-2"
+            placeholder="Details of other conditions/disabilities"
+            rows="2"
+            name="otherConditions.details"
+          ></textarea>
+
+          <div class="form-check">
+            <input
+              class="form-check-input"
+              id="mail"
+              type="checkbox"
+              name="consent.mailUpdates"
+            />
+            <label class="form-check-label" for="mail"
+              >Receive news updates</label
+            >
+          </div>
+          <div class="form-check">
+            <input
+              class="form-check-input"
+              id="terms"
+              type="checkbox"
+              name="consent.terms"
+            />
+            <label class="form-check-label" for="terms"
+              >I agree to the privacy policy and terms</label
+            >
+          </div>
+          <div class="form-check">
+            <input
+              class="form-check-input"
+              id="truth"
+              type="checkbox"
+              name="consent.truth"
+            />
+            <label class="form-check-label" for="truth"
+              >I declare the information is correct</label
+            >
+          </div>
+          <div class="form-check">
+            <input
+              class="form-check-input"
+              id="report"
+              type="checkbox"
+              name="consent.report"
+            />
+            <label class="form-check-label" for="report"
+              >I agree to complete the final survey/report</label
+            >
+          </div>
+          <div class="form-check">
+            <input
+              class="form-check-input"
+              id="media"
+              type="checkbox"
+              name="consent.media"
+            />
+            <label class="form-check-label" for="media"
+              >I give permission for image use</label
+            >
+          </div>
+        </div>
+
+        <div class="step" id="step5">
+          <h2>Thank you for your submission!</h2>
+          <p>Your application has been received. We'll be in touch soon.</p>
+          <p>
+            If you have any questions, feel free to contact us at
+            <a href="mailto:info@blcf.org.au">info@blcf.org.au</a>.
+          </p>
+        </div>
+
+        <!-- Botones -->
+        <div class="buttons d-flex justify-content-between">
+          <button
+            class="btn btn-outline-secondary"
+            onclick="saveStep()"
+            type="button"
+          >
+            Save
+          </button>
+          <div>
+            <button
+              class="btn btn-secondary"
+              onclick="nextStep(-1)"
+              type="button"
+            >
+              Previous
+            </button>
+            <button class="btn btn-primary" onclick="nextStep(1)" type="button">
+              Next
+            </button>
+            <button
+              class="btn btn-success"
+              id="submitBtn"
+              style="display: none"
+              type="submit"
+            >
+              Submit
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
+    <script src="scripts.js"></script>
+  </body>
+</html>
