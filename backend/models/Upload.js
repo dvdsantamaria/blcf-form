@@ -1,5 +1,5 @@
 // models/Upload.js
-const mongoose = require("mongoose");
+import mongoose from "mongoose";
 
 const UploadSchema = new mongoose.Schema({
   key: { type: String, required: true }, // S3 object key
@@ -10,4 +10,6 @@ const UploadSchema = new mongoose.Schema({
   uploadedAt: { type: Date, default: Date.now },
 });
 
-module.exports = mongoose.model("Upload", UploadSchema);
+const Upload = mongoose.model("Upload", UploadSchema);
+
+export default Upload;
