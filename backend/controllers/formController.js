@@ -107,25 +107,27 @@ export const generateUploadUrl = async (req, res) => {
 };
 
 // POST /api/save-draft
+// POST /api/save-draft
 export const saveDraft = async (req, res) => {
   try {
+    const body = req.body || {};
     const now = Date.now();
     const token =
-      req.body.token && /^[A-Za-z0-9._~-]{10,}$/.test(req.body.token)
-        ? req.body.token
+      body.token && /^[A-Za-z0-9._~-]{10,}$/.test(body.token)
+        ? body.token
         : genToken(16);
 
-    const step = Number(req.body.step ?? 0) || 0;
+    const step = Number(body.step ?? 0) || 0;
     const s3Key = `drafts/${token}.json`;
 
-    const fileKeys = extractFileKeysFromBody(req.body);
+    const fileKeys = extractFileKeysFromBody(body);
 
     const draftPayload = {
       token,
       step,
       updatedAt: new Date(now).toISOString(),
       schemaVersion: 1,
-      data: req.body,
+      data: body,
       fileKeys,
     };
 
@@ -172,27 +174,29 @@ export const getDraft = async (req, res) => {
 };
 
 // POST /api/submit-form
+
+// POST /api/submit-form
 export const handleFormSubmission = async (req, res) => {
   try {
+    const body = req.body || {};
     const now = Date.now();
     const token =
-      req.body.token && /^[A-Za-z0-9._~-]{10,}$/.test(req.body.token)
-        ? req.body.token
+      body.token && /^[A-Za-z0-9._~-]{10,}$/.test(body.token)
+        ? body.token
         : genToken(16);
 
     const s3Key = `submissions/${now}_${token}.json`;
-    const fileKeys = extractFileKeysFromBody(req.body);
+    const fileKeys = extractFileKeysFromBody(body);
 
     const payload = {
       token,
       submittedAt: new Date(now).toISOString(),
       schemaVersion: 1,
-      data: req.body,
+      data: body,
       fileKeys,
       consent: {
         acceptedPrivacyPolicy:
-          req.body.accept_privacy === "on" ||
-          req.body.accept_privacy === "true",
+          body.accept_privacy === "on" || body.accept_privacy === "true",
       },
     };
 
