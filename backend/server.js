@@ -1,22 +1,23 @@
 // backend/server.js
+import "dotenv/config";
+
 import express from "express";
 import cors from "cors";
 import mongoose from "mongoose";
-import dotenv from "dotenv";
-import path from "path";
-import { fileURLToPath } from "url";
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-dotenv.config({ path: path.join(__dirname, ".env") });
 
 import formRoutes from "./routes/form.js";
-
-dotenv.config();
 
 const app = express();
 
 app.use(cors({ origin: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// sanity check opcional en logs
+console.log("ENV CHECK:", {
+  BUCKET: process.env.AWS_S3_BUCKET || process.env.AWS_BUCKET_NAME,
+  REGION: process.env.AWS_REGION,
+});
 
 app.use("/api", formRoutes);
 
@@ -39,9 +40,9 @@ mongoose
     process.exit(1);
   });
 
-process.on("unhandledRejection", (err) => {
-  console.error("Unhandled Rejection:", err);
-});
-process.on("uncaughtException", (err) => {
-  console.error("Uncaught Exception:", err);
-});
+process.on("unhandledRejection", (err) =>
+  console.error("Unhandled Rejection:", err)
+);
+process.on("uncaughtException", (err) =>
+  console.error("Uncaught Exception:", err)
+);
