@@ -30,7 +30,7 @@ async function saveStep() {
 
   formData.append("step", currentStep);
 
-  // reusar token si ya existe
+  // reuse token if exists
   const existingToken = localStorage.getItem("draftToken");
   if (existingToken) formData.append("token", existingToken);
 
@@ -81,7 +81,7 @@ document.querySelectorAll('input[type="file"]').forEach((input) => {
     }
 
     try {
-      // 1) pedir URL firmada
+      // 1) presigned URL
       const res = await fetch(
         `${API_BASE}/generate-upload-url?field=${encodeURIComponent(
           fieldName
@@ -90,7 +90,7 @@ document.querySelectorAll('input[type="file"]').forEach((input) => {
       if (!res.ok) throw new Error("No se pudo generar la URL firmada");
       const { url, key } = await res.json();
 
-      // 2) subir directo a S3
+      // 2) direct upload to S3
       const uploadRes = await fetch(url, {
         method: "PUT",
         headers: { "Content-Type": mime },
@@ -100,8 +100,6 @@ document.querySelectorAll('input[type="file"]').forEach((input) => {
       if (uploadRes.ok) {
         input.dataset.s3key = key;
         console.log(`Uploaded to S3: ${key}`);
-
-        // ⚠️ Ya no llamamos a /register-upload (ruta eliminada)
       } else {
         console.error("Upload failed");
         alert("Upload failed.");
@@ -123,7 +121,7 @@ document.getElementById("grantForm").addEventListener("submit", async (e) => {
     if (key) formData.append(`${input.name || "file"}`, key);
   });
 
-  // enviar token para que el backend finalice ese mismo borrador
+  // send token so backend finalizes same draft
   const existingToken = localStorage.getItem("draftToken");
   if (existingToken) formData.append("token", existingToken);
 
@@ -134,7 +132,6 @@ document.getElementById("grantForm").addEventListener("submit", async (e) => {
     });
 
     if (res.ok) {
-      // opcional: limpiar token al finalizar
       localStorage.removeItem("draftToken");
       currentStep = steps.length - 1;
       showStep(currentStep);
