@@ -4,30 +4,40 @@ import cors from "cors";
 import dotenv from "dotenv";
 import mongoose from "mongoose";
 
-import formRoutes from "./routes/form.js"; // asegurate que este archivo también use export default
-import uploadRoutes from "./routes/upload.js";
+import formRoutes from "./routes/form.js";
 
 dotenv.config();
+
 const app = express();
 
-// Middlewares
-app.use(cors());
+app.use(cors({ origin: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Rutas API
-if (formRoutes) app.use("/api", formRoutes);
-app.use("/api", uploadRoutes);
+app.use("/api", formRoutes);
 
-// DB + Server
+app.get("/api/health", (req, res) => {
+  res.json({ ok: true, ts: new Date().toISOString() });
+});
+
+const PORT = process.env.PORT || 3000;
+
 mongoose
   .connect(process.env.MONGO_URI, { serverSelectionTimeoutMS: 15000 })
   .then(() => {
     console.log("Connected to MongoDB Atlas");
-    const PORT = process.env.PORT || 3000;
-    app.listen(PORT, () => console.log(`BLCF backend running on port ${PORT}`));
+    app.listen(PORT, "127.0.0.1", () =>
+      console.log(`BLCF backend running on http://127.0.0.1:${PORT}`)
+    );
   })
   .catch((err) => {
     console.error("Mongo connection error:", err);
     process.exit(1);
   });
+
+process.on("unhandledRejection", (err) => {
+  console.error("Unhandled Rejection:", err);
+});
+process.on("uncaughtException", (err) => {
+  console.error("Uncaught Exception:", err);
+});

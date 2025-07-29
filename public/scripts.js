@@ -1,3 +1,5 @@
+const API_BASE = "/api";
+
 let currentStep = 0;
 const steps = document.querySelectorAll(".step");
 const submitBtn = document.getElementById("submitBtn");
@@ -22,7 +24,6 @@ function saveStep() {
   const form = document.getElementById("grantForm");
   const formData = new FormData(form);
 
-  // Guardamos también las claves S3 de los archivos
   document.querySelectorAll('input[type="file"]').forEach((input) => {
     const key = input.dataset.s3key;
     if (key) {
@@ -32,7 +33,7 @@ function saveStep() {
 
   formData.append("step", currentStep);
 
-  fetch("http://localhost:3000/api/save-draft", {
+  fetch(`${API_BASE}/save-draft`, {
     method: "POST",
     body: formData,
   })
@@ -46,17 +47,14 @@ function saveStep() {
     });
 }
 
-// Manejo de subida de archivos a S3 (con MIME real)
 document.querySelectorAll('input[type="file"]').forEach((input) => {
   input.addEventListener("change", async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
-    // Derivar nombre de campo
     const label = input.previousElementSibling?.innerText || "file";
     const fieldName = label.toLowerCase().replace(/\s+/g, "_");
 
-    // MIME real con fallback por extensión
     const ext = (file.name.split(".").pop() || "").toLowerCase();
     const mimeFallbackByExt = {
       pdf: "application/pdf",
@@ -78,29 +76,26 @@ document.querySelectorAll('input[type="file"]').forEach((input) => {
     }
 
     try {
-      // Usar MIME real en la query
       const res = await fetch(
-        `http://localhost:3000/api/generate-upload-url?field=${encodeURIComponent(
+        `${API_BASE}/generate-upload-url?field=${encodeURIComponent(
           fieldName
         )}&type=${encodeURIComponent(mime)}`
       );
       if (!res.ok) throw new Error("No se pudo generar la URL firmada");
       const { url, key } = await res.json();
 
-      // Subida directa a S3 usando el mismo MIME
       const uploadRes = await fetch(url, {
         method: "PUT",
-        headers: { "Content-Type": mime }, // importante
+        headers: { "Content-Type": mime },
         body: file,
       });
 
       if (uploadRes.ok) {
         input.dataset.s3key = key;
 
-        // Registrar metadata en tu backend
-        const token = localStorage.getItem("draftToken") || ""; // opcional
+        const token = localStorage.getItem("draftToken") || "";
         try {
-          await fetch("http://localhost:3000/api/register-upload", {
+          await fetch(`${API_BASE}/register-upload`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -127,13 +122,11 @@ document.querySelectorAll('input[type="file"]').forEach((input) => {
   });
 });
 
-// Manejo del submit final
 document.getElementById("grantForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const form = e.target;
   const formData = new FormData(form);
 
-  // Incluir claves S3 como en saveStep
   document.querySelectorAll('input[type="file"]').forEach((input) => {
     const key = input.dataset.s3key;
     if (key) {
@@ -142,13 +135,13 @@ document.getElementById("grantForm").addEventListener("submit", async (e) => {
   });
 
   try {
-    const res = await fetch("http://localhost:3000/api/submit-form", {
+    const res = await fetch(`${API_BASE}/submit-form`, {
       method: "POST",
       body: formData,
     });
 
     if (res.ok) {
-      currentStep = steps.length - 1; // step 5 = gracias
+      currentStep = steps.length - 1;
       showStep(currentStep);
     } else {
       alert("Submission failed.");
