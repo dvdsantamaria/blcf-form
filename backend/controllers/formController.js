@@ -107,11 +107,11 @@ export const generateUploadUrl = async (req, res) => {
 };
 
 // POST /api/save-draft
-// POST /api/save-draft
 export const saveDraft = async (req, res) => {
   try {
     const body = req.body || {};
     const now = Date.now();
+
     const token =
       body.token && /^[A-Za-z0-9._~-]{10,}$/.test(body.token)
         ? body.token
@@ -153,7 +153,6 @@ export const saveDraft = async (req, res) => {
     return res.status(500).json({ ok: false, error: "Internal Server Error" });
   }
 };
-
 // GET /api/get-draft?token=XXXX
 export const getDraft = async (req, res) => {
   try {
