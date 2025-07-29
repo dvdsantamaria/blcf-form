@@ -16,12 +16,12 @@ const s3 = new S3Client({
   },
 });
 
-const BUCKET = process.env.AWS_BUCKET_NAME;
+const BUCKET = process.env.AWS_S3_BUCKET || process.env.AWS_BUCKET_NAME;
 const kmsParams = process.env.AWS_KMS_KEY_ID
   ? { ServerSideEncryption: "aws:kms", SSEKMSKeyId: process.env.AWS_KMS_KEY_ID }
   : {};
 
-// -------- utils --------
+// utils
 const genToken = (len = 24) => crypto.randomBytes(len).toString("base64url");
 
 async function putJsonToS3(key, obj) {
@@ -61,7 +61,7 @@ const extFromMime = (m) =>
   }[m] || "bin");
 const sanitize = (s) => String(s).replace(/[^a-z0-9_.-]/gi, "_");
 
-// Heurística para encontrar keys de archivos ya subidos por presigned PUT
+// Extract S3 keys that were uploaded via presigned PUT and sent back in the body
 function extractFileKeysFromBody(body) {
   const keys = [];
   for (const [k, v] of Object.entries(body || {})) {
@@ -75,18 +75,16 @@ function extractFileKeysFromBody(body) {
   return keys;
 }
 
-// -------- Handlers --------
+// Handlers
 
 // GET /api/generate-upload-url?field=...&type=...
 export const generateUploadUrl = async (req, res) => {
   try {
     const { field, type } = req.query || {};
-    if (!field || !type) {
+    if (!field || !type)
       return res.status(400).json({ error: "Missing field or type" });
-    }
-    if (!MIME_ALLOW.has(type)) {
+    if (!MIME_ALLOW.has(type))
       return res.status(400).json({ error: "Unsupported MIME" });
-    }
 
     const key = `${Date.now()}_${sanitize(field)}.${extFromMime(type)}`;
     const cmd = new PutObjectCommand({
@@ -96,7 +94,6 @@ export const generateUploadUrl = async (req, res) => {
       ...kmsParams,
     });
 
-    // Firma válida 5 minutos
     const { getSignedUrl } = await import("@aws-sdk/s3-request-presigner");
     const url = await getSignedUrl(s3, cmd, { expiresIn: 60 * 5 });
     return res.json({ url, key });
@@ -153,13 +150,13 @@ export const saveDraft = async (req, res) => {
     return res.status(500).json({ ok: false, error: "Internal Server Error" });
   }
 };
+
 // GET /api/get-draft?token=XXXX
 export const getDraft = async (req, res) => {
   try {
     const { token } = req.query || {};
-    if (!token) {
+    if (!token)
       return res.status(400).json({ ok: false, error: "Token requerido" });
-    }
 
     const meta = await FormDraft.findOne({ token }).lean().exec();
     const s3Key = meta?.s3Key || `drafts/${token}.json`;
@@ -173,12 +170,11 @@ export const getDraft = async (req, res) => {
 };
 
 // POST /api/submit-form
-
-// POST /api/submit-form
 export const handleFormSubmission = async (req, res) => {
   try {
     const body = req.body || {};
     const now = Date.now();
+
     const token =
       body.token && /^[A-Za-z0-9._~-]{10,}$/.test(body.token)
         ? body.token
