@@ -8,7 +8,7 @@ import {
 } from "../controllers/formController.js";
 
 const router = express.Router();
-const upload = multer(); // para formData (sin files binarios; los files van directo a S3)
+const upload = multer();
 
 router.get("/generate-upload-url", generateUploadUrl);
 router.post("/save-draft", upload.none(), saveDraft);

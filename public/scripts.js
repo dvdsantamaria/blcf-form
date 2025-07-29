@@ -17,34 +17,39 @@ function nextStep(n) {
   currentStep += n;
   if (currentStep >= 0 && currentStep < steps.length) showStep(currentStep);
 }
-
 showStep(currentStep);
 
-function saveStep() {
+async function saveStep() {
   const form = document.getElementById("grantForm");
   const formData = new FormData(form);
 
   document.querySelectorAll('input[type="file"]').forEach((input) => {
     const key = input.dataset.s3key;
-    if (key) {
-      formData.append(`${input.name || "file"}`, key);
-    }
+    if (key) formData.append(`${input.name || "file"}`, key);
   });
 
   formData.append("step", currentStep);
 
-  fetch(`${API_BASE}/save-draft`, {
-    method: "POST",
-    body: formData,
-  })
-    .then((res) => res.json())
-    .then(() => {
-      alert("Draft saved successfully.");
-    })
-    .catch((err) => {
-      console.error(err);
-      alert("Error saving draft.");
+  // reusar token si ya existe
+  const existingToken = localStorage.getItem("draftToken");
+  if (existingToken) formData.append("token", existingToken);
+
+  try {
+    const resp = await fetch(`${API_BASE}/save-draft`, {
+      method: "POST",
+      body: formData,
     });
+    if (!resp.ok) {
+      const txt = await resp.text();
+      throw new Error(`save-draft ${resp.status}: ${txt}`);
+    }
+    const json = await resp.json();
+    if (json?.token) localStorage.setItem("draftToken", json.token);
+    alert("Draft saved successfully.");
+  } catch (err) {
+    console.error(err);
+    alert("Error saving draft.");
+  }
 }
 
 document.querySelectorAll('input[type="file"]').forEach((input) => {
@@ -76,6 +81,7 @@ document.querySelectorAll('input[type="file"]').forEach((input) => {
     }
 
     try {
+      // 1) pedir URL firmada
       const res = await fetch(
         `${API_BASE}/generate-upload-url?field=${encodeURIComponent(
           fieldName
@@ -84,6 +90,7 @@ document.querySelectorAll('input[type="file"]').forEach((input) => {
       if (!res.ok) throw new Error("No se pudo generar la URL firmada");
       const { url, key } = await res.json();
 
+      // 2) subir directo a S3
       const uploadRes = await fetch(url, {
         method: "PUT",
         headers: { "Content-Type": mime },
@@ -92,25 +99,9 @@ document.querySelectorAll('input[type="file"]').forEach((input) => {
 
       if (uploadRes.ok) {
         input.dataset.s3key = key;
-
-        const token = localStorage.getItem("draftToken") || "";
-        try {
-          await fetch(`${API_BASE}/register-upload`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              key,
-              label: fieldName,
-              originalName: file.name,
-              fileType: mime,
-              token,
-            }),
-          });
-        } catch (e) {
-          console.warn("Register metadata failed", e);
-        }
-
         console.log(`Uploaded to S3: ${key}`);
+
+        // ⚠️ Ya no llamamos a /register-upload (ruta eliminada)
       } else {
         console.error("Upload failed");
         alert("Upload failed.");
@@ -129,10 +120,12 @@ document.getElementById("grantForm").addEventListener("submit", async (e) => {
 
   document.querySelectorAll('input[type="file"]').forEach((input) => {
     const key = input.dataset.s3key;
-    if (key) {
-      formData.append(`${input.name || "file"}`, key);
-    }
+    if (key) formData.append(`${input.name || "file"}`, key);
   });
+
+  // enviar token para que el backend finalice ese mismo borrador
+  const existingToken = localStorage.getItem("draftToken");
+  if (existingToken) formData.append("token", existingToken);
 
   try {
     const res = await fetch(`${API_BASE}/submit-form`, {
@@ -141,6 +134,8 @@ document.getElementById("grantForm").addEventListener("submit", async (e) => {
     });
 
     if (res.ok) {
+      // opcional: limpiar token al finalizar
+      localStorage.removeItem("draftToken");
       currentStep = steps.length - 1;
       showStep(currentStep);
     } else {

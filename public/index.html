@@ -483,27 +483,28 @@
         <div class="buttons d-flex justify-content-between">
           <button
             class="btn btn-outline-secondary"
-            onclick="saveStep()"
+            id="saveDraftBtn"
             type="button"
+            onclick="saveStep()"
           >
             Save
           </button>
           <div>
             <button
               class="btn btn-secondary"
-              onclick="nextStep(-1)"
               type="button"
+              onclick="nextStep(-1)"
             >
               Previous
             </button>
-            <button class="btn btn-primary" onclick="nextStep(1)" type="button">
+            <button class="btn btn-primary" type="button" onclick="nextStep(1)">
               Next
             </button>
             <button
               class="btn btn-success"
               id="submitBtn"
-              style="display: none"
               type="submit"
+              style="display: none"
             >
               Submit
             </button>
