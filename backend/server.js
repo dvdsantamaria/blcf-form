@@ -26,9 +26,9 @@ mongoose
   .connect(process.env.MONGO_URI, { serverSelectionTimeoutMS: 15000 })
   .then(() => {
     console.log("Connected to MongoDB Atlas");
-    app.listen(PORT, "127.0.0.1", () =>
-      console.log(`BLCF backend running on http://127.0.0.1:${PORT}`)
-    );
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`BLCF backend running on http://0.0.0.0:${PORT}`);
+    });
   })
   .catch((err) => {
     console.error("Mongo connection error:", err);
