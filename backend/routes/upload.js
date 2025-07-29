@@ -1,8 +1,7 @@
-// routes/upload.js
+// backend/routes/upload.js
 import express from "express";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import Upload from "../models/Upload.js";
 
 const router = express.Router();
 
@@ -61,30 +60,6 @@ router.get("/generate-upload-url", async (req, res) => {
     return res.json({ url, key });
   } catch (err) {
     console.error("generate-upload-url error", err);
-    return res.status(500).json({ error: "Internal Server Error" });
-  }
-});
-
-// POST /api/register-upload  (guarda metadata del archivo subido)
-router.post("/register-upload", async (req, res) => {
-  try {
-    const { key, label, originalName, fileType, token } = req.body || {};
-    if (!key || !label || !originalName || !fileType) {
-      return res.status(400).json({ error: "Missing required fields" });
-    }
-    if (!MIME_ALLOW.has(fileType))
-      return res.status(400).json({ error: "Unsupported MIME" });
-
-    const doc = await Upload.create({
-      key,
-      label,
-      originalName,
-      fileType,
-      token,
-    });
-    return res.json({ success: true, id: doc._id });
-  } catch (err) {
-    console.error("register-upload error", err);
     return res.status(500).json({ error: "Internal Server Error" });
   }
 });
