@@ -1,3 +1,5 @@
+import "dotenv/config";
+
 // backend/controllers/formController.js
 import crypto from "crypto";
 import {
@@ -16,7 +18,7 @@ const s3 = new S3Client({
   },
 });
 
-const BUCKET = process.env.AWS_S3_BUCKET || process.env.AWS_BUCKET_NAME;
+const BUCKET = () => process.env.AWS_S3_BUCKET || process.env.AWS_BUCKET_NAME;
 const kmsParams = process.env.AWS_KMS_KEY_ID
   ? { ServerSideEncryption: "aws:kms", SSEKMSKeyId: process.env.AWS_KMS_KEY_ID }
   : {};
@@ -27,7 +29,7 @@ const genToken = (len = 24) => crypto.randomBytes(len).toString("base64url");
 async function putJsonToS3(key, obj) {
   const body = JSON.stringify(obj);
   const cmd = new PutObjectCommand({
-    Bucket: BUCKET,
+    Bucket: BUCKET(),
     Key: key,
     Body: body,
     ContentType: "application/json",
@@ -38,7 +40,7 @@ async function putJsonToS3(key, obj) {
 }
 
 async function getJsonFromS3(key) {
-  const cmd = new GetObjectCommand({ Bucket: BUCKET, Key: key });
+  const cmd = new GetObjectCommand({ Bucket: BUCKET(), Key: key });
   const res = await s3.send(cmd);
   const text = await res.Body.transformToString();
   return JSON.parse(text);
@@ -88,7 +90,7 @@ export const generateUploadUrl = async (req, res) => {
 
     const key = `${Date.now()}_${sanitize(field)}.${extFromMime(type)}`;
     const cmd = new PutObjectCommand({
-      Bucket: BUCKET,
+      Bucket: BUCKET(),
       Key: key,
       ContentType: type,
       ...kmsParams,
