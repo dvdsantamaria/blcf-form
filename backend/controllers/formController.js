@@ -10,6 +10,7 @@ import {
 import FormSubmission from "../models/FormSubmission.js";
 import FormDraft from "../models/FormDraft.js";
 
+// -------- AWS S3 client --------
 const s3 = new S3Client({
   region: process.env.AWS_REGION,
   credentials: {
@@ -17,13 +18,12 @@ const s3 = new S3Client({
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
   },
 });
-
 const BUCKET = () => process.env.AWS_S3_BUCKET || process.env.AWS_BUCKET_NAME;
 const kmsParams = process.env.AWS_KMS_KEY_ID
   ? { ServerSideEncryption: "aws:kms", SSEKMSKeyId: process.env.AWS_KMS_KEY_ID }
   : {};
 
-// utils
+// -------- utils --------
 const genToken = (len = 24) => crypto.randomBytes(len).toString("base64url");
 
 async function putJsonToS3(key, obj) {
@@ -46,6 +46,7 @@ async function getJsonFromS3(key) {
   return JSON.parse(text);
 }
 
+// MIME allowlist for uploads
 const MIME_ALLOW = new Set([
   "application/pdf",
   "image/jpeg",
@@ -63,7 +64,7 @@ const extFromMime = (m) =>
   }[m] || "bin");
 const sanitize = (s) => String(s).replace(/[^a-z0-9_.-]/gi, "_");
 
-// Extract S3 keys that were uploaded via presigned PUT and sent back in the body
+// Extract S3 keys that were uploaded via presigned PUT and then included back in the body
 function extractFileKeysFromBody(body) {
   const keys = [];
   for (const [k, v] of Object.entries(body || {})) {
@@ -77,7 +78,66 @@ function extractFileKeysFromBody(body) {
   return keys;
 }
 
-// Handlers
+// -------- validation helpers (final submit) --------
+const REQUIRED_TEXT_FIELDS = [
+  "child.firstName",
+  "child.lastName",
+  "child.dob",
+  "parent1.firstName",
+  "parent1.lastName",
+  "parent1.email",
+  "therapy.toBeFunded", // minimal description of what is being requested
+];
+const REQUIRED_CHECKBOX_FIELDS = ["consent.terms", "consent.truth"];
+
+const ONE_OF_FILES = [
+  // at least one of these must be present (S3 keys) before final submit
+  ["docs.supportLetterHealthProfessional", "docs.diagnosisLetter"],
+];
+
+const S3_KEY_RX = /[0-9]{10,}_.+\.(pdf|png|jpg|jpeg|webp|heic)$/i;
+
+function isNonEmpty(val) {
+  return typeof val === "string" && val.trim() !== "";
+}
+function isTruthyCheckbox(val) {
+  return val === "on" || val === "true" || val === true;
+}
+function isEmail(val) {
+  return isNonEmpty(val) && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val.trim());
+}
+function validateSubmission(body) {
+  const errors = [];
+
+  // required text-like fields
+  for (const f of REQUIRED_TEXT_FIELDS) {
+    const v = body[f];
+    if (!isNonEmpty(v)) errors.push(`Missing or empty: ${f}`);
+  }
+
+  // specific format checks
+  if (body["parent1.email"] && !isEmail(body["parent1.email"])) {
+    errors.push("Invalid email format: parent1.email");
+  }
+
+  // required checkboxes
+  for (const f of REQUIRED_CHECKBOX_FIELDS) {
+    const v = body[f];
+    if (!isTruthyCheckbox(v)) errors.push(`You must accept: ${f}`);
+  }
+
+  // at least one of file groups must be provided
+  for (const group of ONE_OF_FILES) {
+    const ok = group.some((f) => S3_KEY_RX.test(String(body[f] || "")));
+    if (!ok) {
+      errors.push(`Provide at least one of: ${group.join(" OR ")}`);
+    }
+  }
+
+  return { ok: errors.length === 0, errors };
+}
+
+// ================== Handlers ==================
 
 // GET /api/generate-upload-url?field=...&type=...
 export const generateUploadUrl = async (req, res) => {
@@ -158,7 +218,7 @@ export const getDraft = async (req, res) => {
   try {
     const { token } = req.query || {};
     if (!token)
-      return res.status(400).json({ ok: false, error: "Token requerido" });
+      return res.status(400).json({ ok: false, error: "Token is required" });
 
     const meta = await FormDraft.findOne({ token }).lean().exec();
     const s3Key = meta?.s3Key || `drafts/${token}.json`;
@@ -167,7 +227,7 @@ export const getDraft = async (req, res) => {
     return res.status(200).json({ ok: true, token, draft });
   } catch (err) {
     console.error("get draft error:", err);
-    return res.status(404).json({ ok: false, error: "Draft no encontrado" });
+    return res.status(404).json({ ok: false, error: "Draft not found" });
   }
 };
 
@@ -179,6 +239,7 @@ export const handleFormSubmission = async (req, res) => {
       contentType: req.headers["content-type"],
       ts: new Date().toISOString(),
     });
+    console.log("[SUBMIT] body keys:", Object.keys(req.body || {}));
 
     const body = req.body || {};
     const now = Date.now();
@@ -187,8 +248,17 @@ export const handleFormSubmission = async (req, res) => {
       body.token && /^[A-Za-z0-9._~-]{10,}$/.test(body.token)
         ? body.token
         : genToken(16);
-
     console.log(`[SUBMIT] token=${token}`);
+
+    // Validate required fields before finalizing the submission
+    const validation = validateSubmission(body);
+    if (!validation.ok) {
+      return res.status(400).json({
+        ok: false,
+        error: "Validation failed",
+        details: validation.errors,
+      });
+    }
 
     const s3Key = `submissions/${now}_${token}.json`;
     const fileKeys = extractFileKeysFromBody(body);
@@ -200,8 +270,11 @@ export const handleFormSubmission = async (req, res) => {
       data: body,
       fileKeys,
       consent: {
+        acceptedTerms: isTruthyCheckbox(body["consent.terms"]),
+        declaredTruth: isTruthyCheckbox(body["consent.truth"]),
         acceptedPrivacyPolicy:
-          body.accept_privacy === "on" || body.accept_privacy === "true",
+          isTruthyCheckbox(body["consent.terms"]) || // keep for backward compatibility
+          isTruthyCheckbox(body["accept_privacy"]),
       },
     };
 
