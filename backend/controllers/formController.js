@@ -27,16 +27,38 @@ const kmsParams = process.env.AWS_KMS_KEY_ID
 const genToken = (len = 24) => crypto.randomBytes(len).toString("base64url");
 
 async function putJsonToS3(key, obj) {
+  // Validar bucket
+  const bucket = BUCKET();
+  if (!bucket) throw new Error("AWS_S3_BUCKET is not defined");
+
+  // Validar payload
+  if (!obj || typeof obj !== "object") {
+    throw new Error("Invalid payload: not an object");
+  }
+
   const body = JSON.stringify(obj);
+  console.log("[putJsonToS3] Uploading", { key, size: body.length });
+
   const cmd = new PutObjectCommand({
-    Bucket: BUCKET(),
+    Bucket: bucket,
     Key: key,
     Body: body,
     ContentType: "application/json",
     ...kmsParams,
   });
-  await s3.send(cmd);
-  return key;
+
+  try {
+    await s3.send(cmd);
+    return key;
+  } catch (err) {
+    console.error("[putJsonToS3] S3 upload error:", {
+      message: err.message,
+      stack: err.stack,
+      bucket,
+      key,
+    });
+    throw err;
+  }
 }
 
 async function getJsonFromS3(key) {
@@ -260,7 +282,9 @@ export const handleFormSubmission = async (req, res) => {
       });
     }
 
-    const s3Key = `submissions/${now}_${token}.json`;
+    const s3Key = `submissions/${now}_${token}_${Math.random()
+      .toString(36)
+      .substring(2, 8)}.json`;
     const fileKeys = extractFileKeysFromBody(body);
 
     const payload = {
@@ -277,7 +301,12 @@ export const handleFormSubmission = async (req, res) => {
           isTruthyCheckbox(body["accept_privacy"]),
       },
     };
-
+    console.log("[S3 UPLOAD]", {
+      bucket: BUCKET(),
+      key: s3Key,
+      payloadKeys: Object.keys(payload),
+      fileKeys,
+    });
     await putJsonToS3(s3Key, payload);
 
     await FormSubmission.create({
