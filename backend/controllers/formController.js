@@ -1,6 +1,5 @@
 // backend/controllers/formController.js
 import "dotenv/config";
-
 import crypto from "crypto";
 import {
   S3Client,
@@ -10,7 +9,6 @@ import {
 import FormSubmission from "../models/FormSubmission.js";
 import FormDraft from "../models/FormDraft.js";
 
-// -------- AWS S3 client --------
 const s3 = new S3Client({
   region: process.env.AWS_REGION,
   credentials: {
@@ -24,7 +22,6 @@ const kmsParams = process.env.AWS_KMS_KEY_ID
   ? { ServerSideEncryption: "aws:kms", SSEKMSKeyId: process.env.AWS_KMS_KEY_ID }
   : {};
 
-// =============== utils comunes ===============
 const genToken = (len = 24) => crypto.randomBytes(len).toString("base64url");
 
 const MIME_ALLOW = new Set([
@@ -46,7 +43,6 @@ const extFromMime = (m) =>
 
 const sanitize = (s) => String(s).replace(/[^a-z0-9_.-]/gi, "_");
 
-// Aceptar tanto el patrón “legacy” (169..._field.pdf) como el nuevo path por token
 const S3_KEY_RX =
   /^(submissions\/[A-Za-z0-9._~-]+\/uploads\/.+\.(pdf|png|jpg|jpeg|webp|heic))$|^[0-9]{10,}_.+\.(pdf|png|jpg|jpeg|webp|heic)$/i;
 
@@ -70,7 +66,6 @@ function isEmail(val) {
   return isNonEmpty(val) && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val.trim());
 }
 
-// =============== helpers S3 por token ===============
 function requireToken(qsToken, bodyToken) {
   const t = (qsToken || bodyToken || "").trim();
   if (!t) throw new Error("Missing token");
@@ -91,7 +86,6 @@ function s3FinalKey(token) {
   return `submissions/${token}/final/submission.json`;
 }
 
-// =============== I/O JSON en S3 ===============
 async function putJsonToS3(key, obj) {
   const bucket = BUCKET();
   if (!bucket) throw new Error("AWS_S3_BUCKET is not defined");
@@ -130,7 +124,6 @@ async function getJsonFromS3(key) {
   return JSON.parse(text);
 }
 
-// =============== validación de submit final ===============
 const REQUIRED_TEXT_FIELDS = [
   "child.firstName",
   "child.lastName",
@@ -165,9 +158,6 @@ function validateSubmission(body) {
   return { ok: errors.length === 0, errors };
 }
 
-// ================== Handlers ==================
-
-// GET /api/generate-upload-url?field=...&type=...&token=...
 export const generateUploadUrl = async (req, res) => {
   try {
     const { field, type, token: qsToken } = req.query || {};
@@ -196,7 +186,6 @@ export const generateUploadUrl = async (req, res) => {
   }
 };
 
-// POST /api/save-draft
 export const saveDraft = async (req, res) => {
   try {
     const body = req.body || {};
@@ -209,7 +198,29 @@ export const saveDraft = async (req, res) => {
 
     const step = Number(body.step ?? 0) || 0;
 
-    // current + history
+    if (step === 0) {
+      const requiredMin = [
+        "parent1.firstName",
+        "parent1.lastName",
+        "parent1.email",
+      ];
+      const missing = requiredMin.filter((f) => !isNonEmpty(body[f]));
+      if (missing.length > 0) {
+        return res.status(400).json({
+          ok: false,
+          error: "Missing required fields in step 0",
+          details: missing,
+        });
+      }
+      if (!isEmail(body["parent1.email"])) {
+        return res.status(400).json({
+          ok: false,
+          error: "Invalid email format",
+          details: ["parent1.email"],
+        });
+      }
+    }
+
     const isoName = new Date(now)
       .toISOString()
       .replace(/[T:]/g, "")
@@ -240,7 +251,7 @@ export const saveDraft = async (req, res) => {
           status: "draft",
           updatedAt: new Date(now),
           lastActivityAt: new Date(now),
-          email: body.email, // si llega
+          email: body.email,
         },
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
@@ -253,7 +264,6 @@ export const saveDraft = async (req, res) => {
   }
 };
 
-// GET /api/get-draft?token=...
 export const getDraft = async (req, res) => {
   try {
     const { token } = req.query || {};
@@ -270,7 +280,6 @@ export const getDraft = async (req, res) => {
   }
 };
 
-// POST /api/submit-form
 export const handleFormSubmission = async (req, res) => {
   try {
     console.log("[SUBMIT] Received /api/submit-form", {
@@ -325,7 +334,6 @@ export const handleFormSubmission = async (req, res) => {
     });
     await putJsonToS3(finalKey, payload);
 
-    // Upsert para no romper si reintentan con el mismo token
     await FormSubmission.findOneAndUpdate(
       { submissionId: token },
       {

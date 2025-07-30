@@ -15,6 +15,7 @@ function showStep(n) {
 }
 
 function nextStep(n) {
+  if (n === 1 && !validateCurrentStep()) return;
   currentStep += n;
   if (currentStep >= 0 && currentStep < steps.length) showStep(currentStep);
 }
@@ -130,6 +131,56 @@ document.querySelectorAll('input[type="file"]').forEach((input) => {
     }
   });
 });
+
+function validateCurrentStep() {
+  // Solo validamos si estamos en el paso 0
+  if (currentStep === 0) {
+    const firstName = document
+      .querySelector('input[name="parent1.firstName"]')
+      ?.value.trim();
+    const lastName = document
+      .querySelector('input[name="parent1.lastName"]')
+      ?.value.trim();
+    const email = document
+      .querySelector('input[name="parent1.email"]')
+      ?.value.trim();
+
+    if (!firstName || !lastName || !email) {
+      showToast("Please complete parent name and email to continue.");
+      return false;
+    }
+  }
+  return true;
+}
+
+function showToast(msg) {
+  let toast = document.getElementById("toast");
+  if (!toast) {
+    toast = document.createElement("div");
+    toast.id = "toast";
+    toast.style.position = "fixed";
+    toast.style.bottom = "20px";
+    toast.style.left = "50%";
+    toast.style.transform = "translateX(-50%)";
+    toast.style.background = "#333";
+    toast.style.color = "#fff";
+    toast.style.padding = "10px 20px";
+    toast.style.borderRadius = "8px";
+    toast.style.fontSize = "14px";
+    toast.style.boxShadow = "0 4px 10px rgba(0,0,0,0.2)";
+    toast.style.zIndex = "9999";
+    toast.style.opacity = "0";
+    toast.style.transition = "opacity 0.3s";
+    document.body.appendChild(toast);
+  }
+
+  toast.innerText = msg;
+  toast.style.opacity = "1";
+
+  setTimeout(() => {
+    toast.style.opacity = "0";
+  }, 3000);
+}
 
 document.getElementById("grantForm").addEventListener("submit", async (e) => {
   e.preventDefault();
