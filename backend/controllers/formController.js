@@ -343,7 +343,6 @@ export const handleFormSubmission = async (req, res) => {
           fileKeys,
           email: body.email,
           lastActivityAt: new Date(now),
-          createdAt: new Date(now),
         },
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
