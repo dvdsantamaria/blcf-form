@@ -174,6 +174,12 @@ export const getDraft = async (req, res) => {
 // POST /api/submit-form
 export const handleFormSubmission = async (req, res) => {
   try {
+    console.log("[SUBMIT] Received /api/submit-form", {
+      method: req.method,
+      contentType: req.headers["content-type"],
+      ts: new Date().toISOString(),
+    });
+
     const body = req.body || {};
     const now = Date.now();
 
@@ -181,6 +187,8 @@ export const handleFormSubmission = async (req, res) => {
       body.token && /^[A-Za-z0-9._~-]{10,}$/.test(body.token)
         ? body.token
         : genToken(16);
+
+    console.log(`[SUBMIT] token=${token}`);
 
     const s3Key = `submissions/${now}_${token}.json`;
     const fileKeys = extractFileKeysFromBody(body);
