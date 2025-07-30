@@ -1,4 +1,6 @@
+// backend/server.js
 import "dotenv/config";
+
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
@@ -14,10 +16,30 @@ import resumeRoutes from "./routes/resume.js";
 
 const app = express();
 
-/* ────────────── BASIC MIDDLEWARES ────────────── */
+/* ────────────── SECURITY & MIDDLEWARE ────────────── */
 app.set("trust proxy", 1);
 app.use(helmet());
-app.use(cors({ origin: true }));
+const allowedOrigins = (process.env.CORS_ALLOW_ORIGINS || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+app.use(
+  cors({
+    origin: (origin, cb) => {
+      if (
+        !origin ||
+        allowedOrigins.length === 0 ||
+        allowedOrigins.includes(origin)
+      ) {
+        return cb(null, true);
+      }
+      return cb(new Error("CORS not allowed"), false);
+    },
+    credentials: true,
+  })
+);
+
 app.use(cookieParser());
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true, limit: "2mb" }));
@@ -27,6 +49,7 @@ app.use(rateLimit({ windowMs: 5 * 60 * 1000, max: 500 }));
 console.log("ENV CHECK:", {
   BUCKET: process.env.AWS_S3_BUCKET || process.env.AWS_BUCKET_NAME,
   REGION: process.env.AWS_REGION,
+  ALLOW_ORIGINS: allowedOrigins,
 });
 
 /* ────────────── ROUTES ────────────── */
@@ -38,7 +61,7 @@ app.get("/api/health", (req, res) => {
   res.json({ ok: true, ts: new Date().toISOString() });
 });
 
-/* ────────────── STATIC FRONTEND ────────────── */
+/* ────────────── STATIC ADMIN FRONTEND ────────────── */
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 app.use("/admin", express.static(path.join(__dirname, "../public/admin")));
@@ -59,7 +82,7 @@ mongoose
     process.exit(1);
   });
 
-/* ────────────── ERROR HANDLING ────────────── */
+/* ────────────── PROCESS-LEVEL ERROR HANDLERS ────────────── */
 process.on("unhandledRejection", (err) =>
   console.error("Unhandled Rejection:", err)
 );
