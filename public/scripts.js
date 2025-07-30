@@ -1,3 +1,4 @@
+// frontend/scripts.js
 const API_BASE = "/api";
 
 let currentStep = 0;
@@ -19,6 +20,26 @@ function nextStep(n) {
 }
 showStep(currentStep);
 
+// Asegura token antes de subir archivos
+async function ensureToken() {
+  let token = localStorage.getItem("draftToken");
+  if (token) return token;
+
+  const fd = new FormData();
+  fd.append("step", currentStep);
+
+  const r = await fetch(`${API_BASE}/save-draft`, { method: "POST", body: fd });
+  if (!r.ok) {
+    const txt = await r.text();
+    throw new Error(`save-draft ${r.status}: ${txt}`);
+  }
+  const j = await r.json();
+  token = j?.token;
+  if (!token) throw new Error("No token returned by save-draft");
+  localStorage.setItem("draftToken", token);
+  return token;
+}
+
 async function saveStep() {
   const form = document.getElementById("grantForm");
   const formData = new FormData(form);
@@ -30,7 +51,7 @@ async function saveStep() {
 
   formData.append("step", currentStep);
 
-  // reuse token if exists
+  // Reuse token si ya existe
   const existingToken = localStorage.getItem("draftToken");
   if (existingToken) formData.append("token", existingToken);
 
@@ -81,29 +102,28 @@ document.querySelectorAll('input[type="file"]').forEach((input) => {
     }
 
     try {
-      // 1) presigned URL
+      // 1) asegurar token
+      const token = await ensureToken();
+
+      // 2) pedir URL firmada con token (path submissions/{token}/uploads/...)
       const res = await fetch(
         `${API_BASE}/generate-upload-url?field=${encodeURIComponent(
           fieldName
-        )}&type=${encodeURIComponent(mime)}`
+        )}&type=${encodeURIComponent(mime)}&token=${encodeURIComponent(token)}`
       );
       if (!res.ok) throw new Error("No se pudo generar la URL firmada");
       const { url, key } = await res.json();
 
-      // 2) direct upload to S3
+      // 3) subir directo a S3
       const uploadRes = await fetch(url, {
         method: "PUT",
         headers: { "Content-Type": mime },
         body: file,
       });
+      if (!uploadRes.ok) throw new Error("Upload failed");
 
-      if (uploadRes.ok) {
-        input.dataset.s3key = key;
-        console.log(`Uploaded to S3: ${key}`);
-      } else {
-        console.error("Upload failed");
-        alert("Upload failed.");
-      }
+      input.dataset.s3key = key; // será enviado luego en save/submit
+      console.log(`Uploaded to S3: ${key}`);
     } catch (err) {
       console.error("Upload error:", err);
       alert("Upload error.");
@@ -121,7 +141,7 @@ document.getElementById("grantForm").addEventListener("submit", async (e) => {
     if (key) formData.append(`${input.name || "file"}`, key);
   });
 
-  // send token so backend finalizes same draft
+  // Enviar token para finalizar el mismo draft
   const existingToken = localStorage.getItem("draftToken");
   if (existingToken) formData.append("token", existingToken);
 
@@ -132,10 +152,13 @@ document.getElementById("grantForm").addEventListener("submit", async (e) => {
     });
 
     if (res.ok) {
+      // limpiar token local tras envío final
       localStorage.removeItem("draftToken");
       currentStep = steps.length - 1;
       showStep(currentStep);
     } else {
+      const txt = await res.text();
+      console.error("Submit failed:", txt);
       alert("Submission failed.");
     }
   } catch (err) {
