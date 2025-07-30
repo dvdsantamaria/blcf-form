@@ -5,7 +5,7 @@ let currentStep = 0;
 const steps = document.querySelectorAll(".step");
 const submitBtn = document.getElementById("submitBtn");
 
-// labels + reglas por paso (0-index)
+// labels + per-step rules (0-indexed)
 const LABEL = {
   "child.firstName": "Child first name",
   "child.lastName": "Child last name",
@@ -35,6 +35,8 @@ function showToast(msg) {
   if (!t) {
     t = document.createElement("div");
     t.id = "toast";
+    t.setAttribute("role", "status");
+    t.setAttribute("aria-live", "polite");
     Object.assign(t.style, {
       position: "fixed",
       bottom: "20px",
@@ -86,7 +88,7 @@ function validateStep(stepIndex) {
 
   (rules.required || []).forEach((name) => {
     const el = container.querySelector(`[name="${name}"]`);
-    if (!el) return; // no crash si el campo no está en el paso
+    if (!el) return; // don't crash if the field isn't present in this step
     const val = el ? String(el.value ?? "").trim() : "";
     const ok = name === "parent1.email" ? isEmail(val) : val.length > 0;
     if (!ok) {
@@ -183,8 +185,8 @@ document.querySelectorAll('input[type="file"]').forEach((input) => {
     const file = e.target.files[0];
     if (!file) return;
 
-    const label = input.previousElementSibling?.innerText || "file";
-    const fieldName = label.toLowerCase().replace(/\s+/g, "_");
+    // Use input.name for stable field mapping (matches backend keys)
+    const fieldName = input.name || "file";
 
     const ext = (file.name.split(".").pop() || "").toLowerCase();
     const mimeFallbackByExt = {
