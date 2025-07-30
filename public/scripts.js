@@ -5,7 +5,7 @@ let currentStep = 0;
 const steps = document.querySelectorAll(".step");
 const submitBtn = document.getElementById("submitBtn");
 
-// --- labels y reglas por paso ---
+// labels + reglas por paso (0-index)
 const LABEL = {
   "child.firstName": "Child first name",
   "child.lastName": "Child last name",
@@ -20,10 +20,10 @@ const LABEL = {
 
 const STEP_RULES = {
   0: { required: ["child.firstName", "child.lastName", "child.dob"] }, // Step 1
-  1: { required: [] }, // Step 2 (NDIS) – sin bloqueo
-  2: { required: ["therapy.toBeFunded"] }, // Step 3 (Therapy)
-  3: { required: ["parent1.firstName", "parent1.lastName", "parent1.email"] }, // Step 4 (Parent)
-  4: { requiredChecks: ["consent.terms", "consent.truth"] }, // Step 5 (Consent)
+  1: { required: ["therapy.toBeFunded"] }, // Step 2 (NDIS/Therapy)
+  2: { required: ["parent1.firstName", "parent1.lastName", "parent1.email"] }, // Step 3 (Parent)
+  3: { requiredChecks: ["consent.terms", "consent.truth"] }, // Step 4 (Consent)
+  4: {}, // Step 5 (Thank you)
 };
 
 function isEmail(v) {
@@ -82,31 +82,37 @@ function validateStep(stepIndex) {
   clearInvalid(container);
 
   const missing = [];
+  let firstInvalid = null;
 
-  // textos/selects
   (rules.required || []).forEach((name) => {
     const el = container.querySelector(`[name="${name}"]`);
-    const val = (el && (el.value ?? "")).toString().trim();
+    if (!el) return; // no crash si el campo no está en el paso
+    const val = el ? String(el.value ?? "").trim() : "";
     const ok = name === "parent1.email" ? isEmail(val) : val.length > 0;
-
     if (!ok) {
       missing.push(LABEL[name] || name);
       markInvalid(el);
+      if (!firstInvalid) firstInvalid = el;
     }
   });
 
-  // checkboxes
   (rules.requiredChecks || []).forEach((name) => {
     const el = container.querySelector(`[name="${name}"]`);
-    const ok = !!(el && el.checked);
+    if (!el) return;
+    const ok = !!el.checked;
     if (!ok) {
       missing.push(LABEL[name] || name);
       markInvalid(el);
+      if (!firstInvalid) firstInvalid = el;
     }
   });
 
   if (missing.length) {
     showToast(`Please complete: ${missing.join(", ")}.`);
+    if (firstInvalid && firstInvalid.scrollIntoView) {
+      firstInvalid.scrollIntoView({ behavior: "smooth", block: "center" });
+      firstInvalid.focus?.();
+    }
     return false;
   }
   return true;
@@ -122,13 +128,13 @@ function showStep(n) {
 }
 
 function nextStep(n) {
-  if (n === 1 && !validateStep(currentStep)) return; // bloquea avance
+  if (n === 1 && !validateStep(currentStep)) return;
   currentStep += n;
   if (currentStep >= 0 && currentStep < steps.length) showStep(currentStep);
 }
 showStep(currentStep);
 
-// --- token + draft + uploads ---
+// token + draft + uploads
 async function ensureToken() {
   let token = localStorage.getItem("draftToken");
   if (token) return token;
@@ -190,7 +196,8 @@ document.querySelectorAll('input[type="file"]').forEach((input) => {
       heic: "image/heic",
       heif: "image/heic",
     };
-    const mime = file.type?.trim() || mimeFallbackByExt[ext] || "";
+    const mime =
+      (file.type && file.type.trim()) || mimeFallbackByExt[ext] || "";
     if (!mime) return showToast("Unsupported/unknown file type.");
 
     try {
@@ -221,8 +228,6 @@ document.querySelectorAll('input[type="file"]').forEach((input) => {
 
 document.getElementById("grantForm").addEventListener("submit", async (e) => {
   e.preventDefault();
-
-  // valida el último paso visible (consents)
   if (!validateStep(currentStep)) return;
 
   const form = e.target;
