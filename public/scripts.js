@@ -5,6 +5,113 @@ let currentStep = 0;
 const steps = document.querySelectorAll(".step");
 const submitBtn = document.getElementById("submitBtn");
 
+// --- labels y reglas por paso ---
+const LABEL = {
+  "child.firstName": "Child first name",
+  "child.lastName": "Child last name",
+  "child.dob": "Date of birth",
+  "therapy.toBeFunded": "Therapy to be funded",
+  "parent1.firstName": "Parent/Carer 1 first name",
+  "parent1.lastName": "Parent/Carer 1 last name",
+  "parent1.email": "Parent/Carer 1 email",
+  "consent.terms": "Agree to privacy & terms",
+  "consent.truth": "Declaration is true",
+};
+
+const STEP_RULES = {
+  0: { required: ["child.firstName", "child.lastName", "child.dob"] }, // Step 1
+  1: { required: [] }, // Step 2 (NDIS) – sin bloqueo
+  2: { required: ["therapy.toBeFunded"] }, // Step 3 (Therapy)
+  3: { required: ["parent1.firstName", "parent1.lastName", "parent1.email"] }, // Step 4 (Parent)
+  4: { requiredChecks: ["consent.terms", "consent.truth"] }, // Step 5 (Consent)
+};
+
+function isEmail(v) {
+  return !!v && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
+}
+
+function showToast(msg) {
+  let t = document.getElementById("toast");
+  if (!t) {
+    t = document.createElement("div");
+    t.id = "toast";
+    Object.assign(t.style, {
+      position: "fixed",
+      bottom: "20px",
+      left: "50%",
+      transform: "translateX(-50%)",
+      background: "#222",
+      color: "#fff",
+      padding: "10px 16px",
+      borderRadius: "10px",
+      fontSize: "14px",
+      boxShadow: "0 6px 18px rgba(0,0,0,.25)",
+      zIndex: 9999,
+      opacity: 0,
+      transition: "opacity .25s",
+    });
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.style.opacity = "1";
+  clearTimeout(t._h);
+  t._h = setTimeout(() => (t.style.opacity = "0"), 3000);
+}
+
+function clearInvalid(container) {
+  container.querySelectorAll(".is-invalid").forEach((el) => {
+    el.classList.remove("is-invalid");
+    el.removeAttribute("aria-invalid");
+  });
+}
+
+function markInvalid(el) {
+  if (!el) return;
+  el.classList.add("is-invalid");
+  el.setAttribute("aria-invalid", "true");
+  const remove = () => el.classList.remove("is-invalid");
+  el.addEventListener("input", remove, { once: true });
+  el.addEventListener("change", remove, { once: true });
+}
+
+function validateStep(stepIndex) {
+  const rules = STEP_RULES[stepIndex] || {};
+  const container = steps[stepIndex];
+  if (!container) return true;
+
+  clearInvalid(container);
+
+  const missing = [];
+
+  // textos/selects
+  (rules.required || []).forEach((name) => {
+    const el = container.querySelector(`[name="${name}"]`);
+    const val = (el && (el.value ?? "")).toString().trim();
+    const ok = name === "parent1.email" ? isEmail(val) : val.length > 0;
+
+    if (!ok) {
+      missing.push(LABEL[name] || name);
+      markInvalid(el);
+    }
+  });
+
+  // checkboxes
+  (rules.requiredChecks || []).forEach((name) => {
+    const el = container.querySelector(`[name="${name}"]`);
+    const ok = !!(el && el.checked);
+    if (!ok) {
+      missing.push(LABEL[name] || name);
+      markInvalid(el);
+    }
+  });
+
+  if (missing.length) {
+    showToast(`Please complete: ${missing.join(", ")}.`);
+    return false;
+  }
+  return true;
+}
+
 function showStep(n) {
   steps.forEach((s, i) => s.classList.toggle("active", i === n));
   document.querySelector('button[onclick="nextStep(-1)"]').style.display =
@@ -15,25 +122,20 @@ function showStep(n) {
 }
 
 function nextStep(n) {
-  if (n === 1 && !validateCurrentStep()) return;
+  if (n === 1 && !validateStep(currentStep)) return; // bloquea avance
   currentStep += n;
   if (currentStep >= 0 && currentStep < steps.length) showStep(currentStep);
 }
 showStep(currentStep);
 
-// Asegura token antes de subir archivos
+// --- token + draft + uploads ---
 async function ensureToken() {
   let token = localStorage.getItem("draftToken");
   if (token) return token;
-
   const fd = new FormData();
   fd.append("step", currentStep);
-
   const r = await fetch(`${API_BASE}/save-draft`, { method: "POST", body: fd });
-  if (!r.ok) {
-    const txt = await r.text();
-    throw new Error(`save-draft ${r.status}: ${txt}`);
-  }
+  if (!r.ok) throw new Error(`save-draft ${r.status}: ${await r.text()}`);
   const j = await r.json();
   token = j?.token;
   if (!token) throw new Error("No token returned by save-draft");
@@ -51,8 +153,6 @@ async function saveStep() {
   });
 
   formData.append("step", currentStep);
-
-  // Reuse token si ya existe
   const existingToken = localStorage.getItem("draftToken");
   if (existingToken) formData.append("token", existingToken);
 
@@ -61,16 +161,14 @@ async function saveStep() {
       method: "POST",
       body: formData,
     });
-    if (!resp.ok) {
-      const txt = await resp.text();
-      throw new Error(`save-draft ${resp.status}: ${txt}`);
-    }
+    if (!resp.ok)
+      throw new Error(`save-draft ${resp.status}: ${await resp.text()}`);
     const json = await resp.json();
     if (json?.token) localStorage.setItem("draftToken", json.token);
-    alert("Draft saved successfully.");
+    showToast("Draft saved.");
   } catch (err) {
     console.error(err);
-    alert("Error saving draft.");
+    showToast("Error saving draft.");
   }
 }
 
@@ -92,30 +190,19 @@ document.querySelectorAll('input[type="file"]').forEach((input) => {
       heic: "image/heic",
       heif: "image/heic",
     };
-    const mime =
-      file.type && file.type.trim() !== ""
-        ? file.type
-        : mimeFallbackByExt[ext] || "";
-
-    if (!mime) {
-      alert("Formato no soportado o desconocido.");
-      return;
-    }
+    const mime = file.type?.trim() || mimeFallbackByExt[ext] || "";
+    if (!mime) return showToast("Unsupported/unknown file type.");
 
     try {
-      // 1) asegurar token
       const token = await ensureToken();
-
-      // 2) pedir URL firmada con token (path submissions/{token}/uploads/...)
       const res = await fetch(
         `${API_BASE}/generate-upload-url?field=${encodeURIComponent(
           fieldName
         )}&type=${encodeURIComponent(mime)}&token=${encodeURIComponent(token)}`
       );
-      if (!res.ok) throw new Error("No se pudo generar la URL firmada");
+      if (!res.ok) throw new Error("Failed to get signed URL");
       const { url, key } = await res.json();
 
-      // 3) subir directo a S3
       const uploadRes = await fetch(url, {
         method: "PUT",
         headers: { "Content-Type": mime },
@@ -123,67 +210,21 @@ document.querySelectorAll('input[type="file"]').forEach((input) => {
       });
       if (!uploadRes.ok) throw new Error("Upload failed");
 
-      input.dataset.s3key = key; // será enviado luego en save/submit
-      console.log(`Uploaded to S3: ${key}`);
+      input.dataset.s3key = key;
+      showToast("File uploaded.");
     } catch (err) {
       console.error("Upload error:", err);
-      alert("Upload error.");
+      showToast("Upload error.");
     }
   });
 });
 
-function validateCurrentStep() {
-  // Solo validamos si estamos en el paso 0
-  if (currentStep === 0) {
-    const firstName = document
-      .querySelector('input[name="parent1.firstName"]')
-      ?.value.trim();
-    const lastName = document
-      .querySelector('input[name="parent1.lastName"]')
-      ?.value.trim();
-    const email = document
-      .querySelector('input[name="parent1.email"]')
-      ?.value.trim();
-
-    if (!firstName || !lastName || !email) {
-      showToast("Please complete parent name and email to continue.");
-      return false;
-    }
-  }
-  return true;
-}
-
-function showToast(msg) {
-  let toast = document.getElementById("toast");
-  if (!toast) {
-    toast = document.createElement("div");
-    toast.id = "toast";
-    toast.style.position = "fixed";
-    toast.style.bottom = "20px";
-    toast.style.left = "50%";
-    toast.style.transform = "translateX(-50%)";
-    toast.style.background = "#333";
-    toast.style.color = "#fff";
-    toast.style.padding = "10px 20px";
-    toast.style.borderRadius = "8px";
-    toast.style.fontSize = "14px";
-    toast.style.boxShadow = "0 4px 10px rgba(0,0,0,0.2)";
-    toast.style.zIndex = "9999";
-    toast.style.opacity = "0";
-    toast.style.transition = "opacity 0.3s";
-    document.body.appendChild(toast);
-  }
-
-  toast.innerText = msg;
-  toast.style.opacity = "1";
-
-  setTimeout(() => {
-    toast.style.opacity = "0";
-  }, 3000);
-}
-
 document.getElementById("grantForm").addEventListener("submit", async (e) => {
   e.preventDefault();
+
+  // valida el último paso visible (consents)
+  if (!validateStep(currentStep)) return;
+
   const form = e.target;
   const formData = new FormData(form);
 
@@ -192,7 +233,6 @@ document.getElementById("grantForm").addEventListener("submit", async (e) => {
     if (key) formData.append(`${input.name || "file"}`, key);
   });
 
-  // Enviar token para finalizar el mismo draft
   const existingToken = localStorage.getItem("draftToken");
   if (existingToken) formData.append("token", existingToken);
 
@@ -201,19 +241,18 @@ document.getElementById("grantForm").addEventListener("submit", async (e) => {
       method: "POST",
       body: formData,
     });
-
     if (res.ok) {
-      // limpiar token local tras envío final
       localStorage.removeItem("draftToken");
       currentStep = steps.length - 1;
       showStep(currentStep);
+      showToast("Submission received.");
     } else {
       const txt = await res.text();
       console.error("Submit failed:", txt);
-      alert("Submission failed.");
+      showToast("Submission failed.");
     }
   } catch (err) {
-    console.error("❌ Submit error:", err);
-    alert("Submission failed.");
+    console.error("Submit error:", err);
+    showToast("Submission failed.");
   }
 });
