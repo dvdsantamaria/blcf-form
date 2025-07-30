@@ -1,6 +1,5 @@
 import "dotenv/config";
 
-// backend/controllers/formController.js
 import crypto from "crypto";
 import {
   S3Client,
@@ -27,11 +26,9 @@ const kmsParams = process.env.AWS_KMS_KEY_ID
 const genToken = (len = 24) => crypto.randomBytes(len).toString("base64url");
 
 async function putJsonToS3(key, obj) {
-  // Validar bucket
   const bucket = BUCKET();
   if (!bucket) throw new Error("AWS_S3_BUCKET is not defined");
 
-  // Validar payload
   if (!obj || typeof obj !== "object") {
     throw new Error("Invalid payload: not an object");
   }
@@ -68,7 +65,6 @@ async function getJsonFromS3(key) {
   return JSON.parse(text);
 }
 
-// MIME allowlist for uploads
 const MIME_ALLOW = new Set([
   "application/pdf",
   "image/jpeg",
@@ -76,6 +72,7 @@ const MIME_ALLOW = new Set([
   "image/webp",
   "image/heic",
 ]);
+
 const extFromMime = (m) =>
   ({
     "application/pdf": "pdf",
@@ -84,9 +81,9 @@ const extFromMime = (m) =>
     "image/webp": "webp",
     "image/heic": "heic",
   }[m] || "bin");
+
 const sanitize = (s) => String(s).replace(/[^a-z0-9_.-]/gi, "_");
 
-// Extract S3 keys that were uploaded via presigned PUT and then included back in the body
 function extractFileKeysFromBody(body) {
   const keys = [];
   for (const [k, v] of Object.entries(body || {})) {
@@ -100,7 +97,7 @@ function extractFileKeysFromBody(body) {
   return keys;
 }
 
-// -------- validation helpers (final submit) --------
+// -------- validation helpers --------
 const REQUIRED_TEXT_FIELDS = [
   "child.firstName",
   "child.lastName",
@@ -108,15 +105,12 @@ const REQUIRED_TEXT_FIELDS = [
   "parent1.firstName",
   "parent1.lastName",
   "parent1.email",
-  "therapy.toBeFunded", // minimal description of what is being requested
+  "therapy.toBeFunded",
 ];
 const REQUIRED_CHECKBOX_FIELDS = ["consent.terms", "consent.truth"];
-
 const ONE_OF_FILES = [
-  // at least one of these must be present (S3 keys) before final submit
   ["docs.supportLetterHealthProfessional", "docs.diagnosisLetter"],
 ];
-
 const S3_KEY_RX = /[0-9]{10,}_.+\.(pdf|png|jpg|jpeg|webp|heic)$/i;
 
 function isNonEmpty(val) {
@@ -131,29 +125,21 @@ function isEmail(val) {
 function validateSubmission(body) {
   const errors = [];
 
-  // required text-like fields
   for (const f of REQUIRED_TEXT_FIELDS) {
-    const v = body[f];
-    if (!isNonEmpty(v)) errors.push(`Missing or empty: ${f}`);
+    if (!isNonEmpty(body[f])) errors.push(`Missing or empty: ${f}`);
   }
 
-  // specific format checks
   if (body["parent1.email"] && !isEmail(body["parent1.email"])) {
     errors.push("Invalid email format: parent1.email");
   }
 
-  // required checkboxes
   for (const f of REQUIRED_CHECKBOX_FIELDS) {
-    const v = body[f];
-    if (!isTruthyCheckbox(v)) errors.push(`You must accept: ${f}`);
+    if (!isTruthyCheckbox(body[f])) errors.push(`You must accept: ${f}`);
   }
 
-  // at least one of file groups must be provided
   for (const group of ONE_OF_FILES) {
     const ok = group.some((f) => S3_KEY_RX.test(String(body[f] || "")));
-    if (!ok) {
-      errors.push(`Provide at least one of: ${group.join(" OR ")}`);
-    }
+    if (!ok) errors.push(`Provide at least one of: ${group.join(" OR ")}`);
   }
 
   return { ok: errors.length === 0, errors };
@@ -161,7 +147,6 @@ function validateSubmission(body) {
 
 // ================== Handlers ==================
 
-// GET /api/generate-upload-url?field=...&type=...
 export const generateUploadUrl = async (req, res) => {
   try {
     const { field, type } = req.query || {};
@@ -179,7 +164,8 @@ export const generateUploadUrl = async (req, res) => {
     });
 
     const { getSignedUrl } = await import("@aws-sdk/s3-request-presigner");
-    const url = await getSignedUrl(s3, cmd, { expiresIn: 60 * 5 });
+    const url = await getSignedUrl(s3, cmd, { expiresIn: 300 });
+
     return res.json({ url, key });
   } catch (err) {
     console.error("generate-upload-url error:", err);
@@ -187,20 +173,16 @@ export const generateUploadUrl = async (req, res) => {
   }
 };
 
-// POST /api/save-draft
 export const saveDraft = async (req, res) => {
   try {
     const body = req.body || {};
     const now = Date.now();
-
     const token =
       body.token && /^[A-Za-z0-9._~-]{10,}$/.test(body.token)
         ? body.token
         : genToken(16);
-
     const step = Number(body.step ?? 0) || 0;
     const s3Key = `drafts/${token}.json`;
-
     const fileKeys = extractFileKeysFromBody(body);
 
     const draftPayload = {
@@ -235,7 +217,6 @@ export const saveDraft = async (req, res) => {
   }
 };
 
-// GET /api/get-draft?token=XXXX
 export const getDraft = async (req, res) => {
   try {
     const { token } = req.query || {};
@@ -253,7 +234,6 @@ export const getDraft = async (req, res) => {
   }
 };
 
-// POST /api/submit-form
 export const handleFormSubmission = async (req, res) => {
   try {
     console.log("[SUBMIT] Received /api/submit-form", {
@@ -265,16 +245,15 @@ export const handleFormSubmission = async (req, res) => {
 
     const body = req.body || {};
     const now = Date.now();
-
     const token =
       body.token && /^[A-Za-z0-9._~-]{10,}$/.test(body.token)
         ? body.token
         : genToken(16);
     console.log(`[SUBMIT] token=${token}`);
 
-    // Validate required fields before finalizing the submission
     const validation = validateSubmission(body);
     if (!validation.ok) {
+      console.warn("[VALIDATION FAILED]", validation.errors);
       return res.status(400).json({
         ok: false,
         error: "Validation failed",
@@ -297,10 +276,11 @@ export const handleFormSubmission = async (req, res) => {
         acceptedTerms: isTruthyCheckbox(body["consent.terms"]),
         declaredTruth: isTruthyCheckbox(body["consent.truth"]),
         acceptedPrivacyPolicy:
-          isTruthyCheckbox(body["consent.terms"]) || // keep for backward compatibility
+          isTruthyCheckbox(body["consent.terms"]) ||
           isTruthyCheckbox(body["accept_privacy"]),
       },
     };
+
     console.log("[S3 UPLOAD]", {
       bucket: BUCKET(),
       key: s3Key,
@@ -309,13 +289,29 @@ export const handleFormSubmission = async (req, res) => {
     });
     await putJsonToS3(s3Key, payload);
 
-    await FormSubmission.create({
+    const submissionRecord = {
       submissionId: token,
       s3Key,
       status: "submitted",
       fileKeys,
       createdAt: new Date(now),
-    });
+    };
+
+    console.log("[DB] Inserting submission", submissionRecord);
+
+    try {
+      await FormSubmission.create(submissionRecord);
+      console.log("[DB] Submission inserted successfully.");
+    } catch (err) {
+      console.error("[DB] Submission insert error:", {
+        message: err.message,
+        stack: err.stack,
+        record: submissionRecord,
+      });
+      return res
+        .status(500)
+        .json({ ok: false, error: "Database insert failed" });
+    }
 
     await FormDraft.findOneAndUpdate(
       { token },
