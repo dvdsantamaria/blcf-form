@@ -5,7 +5,6 @@ const steps = document.querySelectorAll(".step");
 const submitBtn = document.getElementById("submitBtn");
 const saveBtn = document.getElementById("saveDraftBtn");
 
-// Human-readable labels for errors
 const LABEL = {
   "child.firstName": "Child first name",
   "child.lastName": "Child last name",
