@@ -160,20 +160,15 @@ async function saveStep() {
   const form = document.getElementById("grantForm");
   const formData = new FormData(form);
 
-  // Remove any File blobs so multer doesn’t choke
+  // 1) quitar blobs y mandar sólo keys S3
   document.querySelectorAll('input[type="file"]').forEach((input) => {
-    if (formData.has(input.name)) {
-      formData.delete(input.name);
-    }
-  });
-
-  // Append only S3 keys
-  document.querySelectorAll('input[type="file"]').forEach((input) => {
+    if (formData.has(input.name)) formData.delete(input.name);
     const key = input.dataset.s3key;
     if (key) formData.append(input.name, key);
   });
 
   formData.append("step", currentStep);
+
   const existingToken = localStorage.getItem("draftToken");
   if (existingToken) formData.append("token", existingToken);
 
@@ -185,7 +180,31 @@ async function saveStep() {
     if (!resp.ok)
       throw new Error(`save-draft ${resp.status}: ${await resp.text()}`);
     const json = await resp.json();
+
+    // Asegurar que el token queda guardado
     if (json.token) localStorage.setItem("draftToken", json.token);
+
+    // 2) Enviar link de reanudación UNA sola vez por token
+    const emailEl = document.querySelector('[name="parent1.email"]');
+    const email = emailEl?.value?.trim();
+    const token = localStorage.getItem("draftToken");
+    const sentKey = token ? `resumeSent:${token}` : null;
+
+    if (
+      email &&
+      /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) &&
+      token &&
+      (!sentKey || !localStorage.getItem(sentKey))
+    ) {
+      fetch("/api/resume/send-link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token, email }),
+      }).then(() => {
+        if (sentKey) localStorage.setItem(sentKey, "1");
+      });
+    }
+
     showToast("Draft saved.");
   } catch (err) {
     console.error(err);
