@@ -16,6 +16,13 @@ const upload = multer(); // para form-data sin archivos (ya subimos directo a S3
 router.get("/generate-upload-url", generateUploadUrl);
 router.post("/save-draft", upload.none(), saveDraft);
 router.get("/get-draft", getDraft);
-router.post("/submit-form", upload.none(), handleFormSubmission);
-
+router.post("/submit-form", (req, res, next) => {
+  upload.none()(req, res, (err) => {
+    if (err)
+      return res
+        .status(400)
+        .json({ ok: false, error: "Form parsing error", details: err.message });
+    handleFormSubmission(req, res);
+  });
+});
 export default router;

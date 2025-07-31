@@ -8,6 +8,7 @@ import cookieParser from "cookie-parser";
 import rateLimit from "express-rate-limit";
 import mongoose from "mongoose";
 import path from "path";
+import multer from "multer";
 import { fileURLToPath } from "url";
 
 import formRoutes from "./routes/form.js";
@@ -65,6 +66,26 @@ app.get("/api/health", (req, res) => {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 app.use("/admin", express.static(path.join(__dirname, "../public/admin")));
+
+// Global error handler
+app.use((err, req, res, next) => {
+  if (err instanceof multer.MulterError) {
+    return res
+      .status(400)
+      .json({ ok: false, error: "Multer error", details: err.message });
+  }
+  if (err) {
+    console.error("Unhandled error:", err);
+    return res
+      .status(500)
+      .json({
+        ok: false,
+        error: "Internal Server Error",
+        details: err.message,
+      });
+  }
+  next();
+});
 
 /* ────────────── START SERVER ────────────── */
 const PORT = process.env.PORT || 3000;
