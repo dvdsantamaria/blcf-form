@@ -48,15 +48,50 @@ async function streamToString(stream) {
 const S3_BUCKET =
   process.env.S3_BUCKET || process.env.AWS_S3_BUCKET || process.env.BUCKET_NAME;
 
-// POST /api/resume/send-link   { email, token }
+/* Send email via SES with clear logs (returns { ok, id } or { ok:false, code, message }) */
+async function sendSesEmail(to, subject, text) {
+  try {
+    if (!process.env.SES_FROM) {
+      return { ok: false, code: "NO_FROM", message: "SES_FROM not set" };
+    }
+    const cmd = new SendEmailCommand({
+      Destination: { ToAddresses: [to] },
+      Source: process.env.SES_FROM,
+      Message: {
+        Subject: { Data: subject },
+        Body: { Text: { Data: text } },
+      },
+    });
+    const out = await ses.send(cmd);
+    console.log("[SES] sent", {
+      to,
+      from: process.env.SES_FROM,
+      id: out?.MessageId,
+    });
+    return { ok: true, id: out?.MessageId };
+  } catch (e) {
+    const code = e?.Code || e?.name || "SES_ERROR";
+    const message = e?.Error?.Message || e?.message || String(e);
+    console.error("[SES] error", {
+      to,
+      from: process.env.SES_FROM,
+      code,
+      message,
+    });
+    return { ok: false, code, message };
+  }
+}
+
+/* POST /api/resume/send-link  body: { email, token } */
 export async function sendResumeLink(req, res) {
   try {
     const { email, token } = req.body || {};
-    if (!email || !isEmail(email))
+    if (!email || !isEmail(email)) {
       return res.status(400).json({ ok: false, error: "Invalid email" });
-    if (!token)
+    }
+    if (!token) {
       return res.status(400).json({ ok: false, error: "Missing token" });
-
+    }
     console.log("[sendResumeLink] email:", email, "token:", token);
 
     const draft = await FormDraft.findOne({ token }).lean();
@@ -67,7 +102,7 @@ export async function sendResumeLink(req, res) {
     }
 
     const rt = genToken(24);
-    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24h
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
     await ResumeToken.create({
       resumeToken: rt,
       submissionId: token,
@@ -82,42 +117,31 @@ export async function sendResumeLink(req, res) {
           }/api/resume/exchange?rt=${encodeURIComponent(rt)}`
         : `EXCHANGE: /api/resume/exchange?rt=${rt}`;
 
-    if (process.env.SES_FROM) {
-      const cmd = new SendEmailCommand({
-        Destination: { ToAddresses: [email] },
-        Source: process.env.SES_FROM,
-        Message: {
-          Subject: { Data: "Resume your application" },
-          Body: {
-            Text: {
-              Data: `Hello,\n\nUse this secure link (valid 24h) to resume your application:\n\n${exchangeUrl}\n\nIf you didn't request this, please ignore this email.`,
-            },
-          },
-        },
-      });
-      await ses.send(cmd);
-      console.log("[sendResumeLink] SES email sent to:", email);
-    } else {
-      console.warn(
-        "[sendResumeLink] SES_FROM not set. DEV fallback link:",
-        exchangeUrl
-      );
-    }
+    const subject = "Resume your application";
+    const text = `Hello,
+
+Use this secure link (valid 24h) to resume your application:
+
+${exchangeUrl}
+
+If you didn't request this, please ignore this email.`;
+
+    const mail = await sendSesEmail(email, subject, text);
 
     await FormDraft.findOneAndUpdate(
       { token },
-      { $set: { email, lastActivityAt: new Date() } },
+      { $set: { email, lastActivityAt: new Date(), lastEmailStatus: mail } },
       { upsert: true }
     );
 
-    return res.json({ ok: true });
+    return res.json({ ok: true, mail });
   } catch (err) {
     console.error("sendResumeLink error:", err);
     return res.status(500).json({ ok: false, error: "Internal Server Error" });
   }
 }
 
-// GET /api/resume/exchange?rt=...
+/* GET /api/resume/exchange?rt=...  (sets cookie and redirects to front) */
 export async function exchangeResumeToken(req, res) {
   try {
     const { rt } = req.query || {};
@@ -152,13 +176,13 @@ export async function exchangeResumeToken(req, res) {
   }
 }
 
-// GET /api/resume/get-draft?token=...
+/* GET /api/resume/get-draft?token=...  (returns plain data for form) */
 export async function getDraft(req, res) {
   try {
     const token = req.query?.token || req.cookies?.resume;
-    if (!token)
+    if (!token) {
       return res.status(400).json({ ok: false, error: "Missing token" });
-
+    }
     console.log("[getDraft] Token:", token);
 
     const doc = await FormDraft.findOne({ token }).lean();
@@ -187,7 +211,7 @@ export async function getDraft(req, res) {
   }
 }
 
-// GET /api/resume/whoami
+/* GET /api/resume/whoami -> { ok, token } */
 export async function whoAmI(req, res) {
   try {
     const token = req.cookies?.resume;
@@ -199,13 +223,64 @@ export async function whoAmI(req, res) {
   }
 }
 
-// POST /api/resume/logout
+/* POST /api/resume/logout (clears cookie) */
 export async function logout(req, res) {
   try {
     res.clearCookie("resume", { path: "/" });
     return res.json({ ok: true });
   } catch (err) {
     console.error("logout error:", err);
+    return res.status(500).json({ ok: false, error: "Internal Server Error" });
+  }
+}
+
+/* DEV ONLY: test email endpoint
+   Enabled only if process.env.ENABLE_SES_TEST === "1"
+   GET /api/resume/test-email?email=...&token=...
+*/
+export async function testSes(req, res) {
+  try {
+    if (process.env.ENABLE_SES_TEST !== "1") {
+      return res.status(403).json({ ok: false, error: "Disabled" });
+    }
+    const email = req.query?.email;
+    const token = req.query?.token;
+    if (!email || !isEmail(email) || !token) {
+      return res
+        .status(400)
+        .json({ ok: false, error: "Missing email or token" });
+    }
+    const draft = await FormDraft.findOne({ token }).lean();
+    if (!draft)
+      return res.status(404).json({ ok: false, error: "Draft not found" });
+
+    const rt = genToken(24);
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    await ResumeToken.create({
+      resumeToken: rt,
+      submissionId: token,
+      email,
+      expiresAt,
+    });
+
+    const exchangeUrl =
+      BACKEND_BASE_URL || PUBLIC_BASE_URL
+        ? `${
+            BACKEND_BASE_URL || PUBLIC_BASE_URL
+          }/api/resume/exchange?rt=${encodeURIComponent(rt)}`
+        : `EXCHANGE: /api/resume/exchange?rt=${rt}`;
+
+    const subject = "BLCF test email";
+    const text = `Test link:
+
+${exchangeUrl}
+
+(24h)`;
+
+    const mail = await sendSesEmail(email, subject, text);
+    return res.json({ ok: true, mail, exchangeUrl });
+  } catch (e) {
+    console.error("testSes error:", e);
     return res.status(500).json({ ok: false, error: "Internal Server Error" });
   }
 }
