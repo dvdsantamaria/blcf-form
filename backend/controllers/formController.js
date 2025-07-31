@@ -34,9 +34,8 @@ const EMAIL_RX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function getField(body, dottedPath) {
   if (!body) return undefined;
-  if (Object.prototype.hasOwnProperty.call(body, dottedPath)) {
+  if (Object.prototype.hasOwnProperty.call(body, dottedPath))
     return body[dottedPath];
-  }
   return dottedPath.split(".").reduce((acc, k) => {
     return acc && typeof acc === "object" ? acc[k] : undefined;
   }, body);
@@ -57,6 +56,7 @@ function extractFileKeysFromBody(body) {
 
 async function putJsonToS3(key, obj) {
   const body = JSON.stringify(obj);
+  console.log("[putJsonToS3] Uploading", { key, size: body.length });
   const cmd = new PutObjectCommand({
     Bucket: BUCKET,
     Key: key,
@@ -92,6 +92,7 @@ export const saveDraft = async (req, res) => {
     const body = req.body || {};
     const now = new Date();
     const timestamp = now.toISOString();
+
     const token =
       body.token && /^[A-Za-z0-9._~-]{10,}$/.test(body.token)
         ? body.token
@@ -118,6 +119,7 @@ export const saveDraft = async (req, res) => {
       fileKeys,
     };
 
+    console.log("[save-draft] token:", token, "step:", step);
     await putJsonToS3(currentKey, draftPayload);
     await putJsonToS3(historyKey, draftPayload);
 
@@ -137,6 +139,7 @@ export const saveDraft = async (req, res) => {
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
+    console.log("✅ Draft saved:", token);
     return res.status(200).json({ ok: true, token, s3Key: currentKey, step });
   } catch (err) {
     console.error("save draft error:", err);
@@ -172,6 +175,7 @@ export const handleFormSubmission = async (req, res) => {
       fileKeys,
     };
 
+    console.log("[submit] token:", token);
     await putJsonToS3(finalKey, payload);
 
     await FormSubmission.findOneAndUpdate(
@@ -213,6 +217,7 @@ export const handleFormSubmission = async (req, res) => {
       );
     }
 
+    console.log("✅ Submission saved:", token);
     return res.status(200).json({ ok: true, token, s3Key: finalKey });
   } catch (err) {
     console.error("submit error:", err);
@@ -220,18 +225,27 @@ export const handleFormSubmission = async (req, res) => {
   }
 };
 
-// GENERATE PRESIGNED UPLOAD URL
+// GENERATE PRESIGNED UPLOAD URL (accepts field or filename)
 export const generateUploadUrl = async (req, res) => {
   try {
-    const { token, filename, type } = req.query;
-    if (!token || !filename || !type) {
+    const { token, filename, type, field } = req.query;
+    if (!token || !type || (!filename && !field)) {
       return res.status(400).json({ ok: false, error: "Missing parameters" });
     }
 
-    const ext = filename.split(".").pop();
-    const key = `submissions/${token}/uploads/${crypto
-      .randomBytes(12)
-      .toString("hex")}.${ext}`;
+    const extFromFilename = filename ? filename.split(".").pop() : null;
+    const extFromType = type && type.includes("/") ? type.split("/")[1] : null;
+    const ext = (extFromFilename || extFromType || "bin")
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, "");
+
+    const safeField = (field || "file")
+      .toLowerCase()
+      .replace(/[^a-z0-9_.-]/g, "_");
+    const iso = new Date().toISOString().replace(/[-:.TZ]/g, "");
+    const key = `submissions/${token}/uploads/${iso}_${safeField}.${ext}`;
+
+    console.log("[presign] token:", token, "key:", key);
 
     const cmd = new PutObjectCommand({
       Bucket: BUCKET,
@@ -248,13 +262,12 @@ export const generateUploadUrl = async (req, res) => {
   }
 };
 
-// GET DRAFT
+// GET DRAFT (rarely used by front, kept for completeness)
 export const getDraft = async (req, res) => {
   try {
     const { token } = req.query;
-    if (!token) {
+    if (!token)
       return res.status(400).json({ ok: false, error: "Missing token" });
-    }
 
     const cmd = new GetObjectCommand({
       Bucket: BUCKET,
@@ -264,9 +277,7 @@ export const getDraft = async (req, res) => {
     const draft = await s3.send(cmd);
     const stream = draft.Body;
     const chunks = [];
-    for await (const chunk of stream) {
-      chunks.push(chunk);
-    }
+    for await (const chunk of stream) chunks.push(chunk);
 
     const raw = Buffer.concat(chunks).toString("utf8");
     const json = JSON.parse(raw);

@@ -5,6 +5,7 @@ const steps = document.querySelectorAll(".step");
 const submitBtn = document.getElementById("submitBtn");
 const saveBtn = document.getElementById("saveDraftBtn");
 
+// Human-readable labels for errors
 const LABEL = {
   "child.firstName": "Child first name",
   "child.lastName": "Child last name",
@@ -134,9 +135,13 @@ function nextStep(n) {
 }
 showStep(currentStep);
 
-// Load draft when coming from email resume link (cookie-based)
+// Only load draft after coming from email link (?resumed=1)
 (async function loadDraftOnInit() {
   try {
+    const qs = new URLSearchParams(location.search);
+    const resumed = qs.get("resumed") === "1";
+    if (!resumed) return; // do not auto-load if user lands directly
+
     // Send cookies (HttpOnly) so whoami can read the resume cookie
     const who = await fetch(`${API_BASE}/resume/whoami`, {
       credentials: "include",
@@ -151,12 +156,22 @@ showStep(currentStep);
       `${API_BASE}/resume/get-draft?token=${encodeURIComponent(token)}`,
       { credentials: "include" }
     );
-    if (!res.ok) return;
+    if (!res.ok) {
+      console.warn("[draft] get-draft failed:", res.status);
+      return;
+    }
     const data = await res.json();
     if (!data || typeof data !== "object") return;
 
+    // Avoid showing toast if payload is empty (only step or nothing)
+    const entries = Object.entries(data).filter(([k]) => k !== "step");
+    if (entries.length === 0) {
+      console.log("[draft] empty payload for token:", token);
+      return;
+    }
+
     // Populate inputs
-    Object.entries(data).forEach(([name, value]) => {
+    entries.forEach(([name, value]) => {
       const input = document.querySelector(`[name="${name}"]`);
       if (!input) return;
 
@@ -340,6 +355,10 @@ document.getElementById("grantForm").addEventListener("submit", async (e) => {
     });
     if (res.ok) {
       localStorage.removeItem("draftToken");
+      // clean resumeSent markers for cleanliness
+      Object.keys(localStorage)
+        .filter((k) => k.startsWith("resumeSent:"))
+        .forEach((k) => localStorage.removeItem(k));
       currentStep = steps.length - 1;
       showStep(currentStep);
       showToast("Submission received.");
@@ -352,3 +371,20 @@ document.getElementById("grantForm").addEventListener("submit", async (e) => {
     showToast("Submission failed.");
   }
 });
+
+// Dev helper to clear resume session (cookie + local storage)
+// Run from console: window.devClearResumeSession()
+window.devClearResumeSession = async function () {
+  try {
+    await fetch(`${API_BASE}/resume/logout`, {
+      method: "POST",
+      credentials: "include",
+    });
+  } catch (_) {}
+  localStorage.removeItem("draftToken");
+  Object.keys(localStorage)
+    .filter((k) => k.startsWith("resumeSent:"))
+    .forEach((k) => localStorage.removeItem(k));
+  showToast("Resume session cleared.");
+  setTimeout(() => location.replace("/"), 500);
+};
