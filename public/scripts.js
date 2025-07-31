@@ -4,6 +4,7 @@ const API_BASE = "/api";
 let currentStep = 0;
 const steps = document.querySelectorAll(".step");
 const submitBtn = document.getElementById("submitBtn");
+const saveBtn = document.getElementById("saveDraftBtn");
 
 // labels + per-step rules (0-indexed)
 const LABEL = {
@@ -19,11 +20,11 @@ const LABEL = {
 };
 
 const STEP_RULES = {
-  0: { required: ["child.firstName", "child.lastName", "child.dob"] }, // Step 1
-  1: { required: ["therapy.toBeFunded"] }, // Step 2 (NDIS/Therapy)
-  2: { required: ["parent1.firstName", "parent1.lastName", "parent1.email"] }, // Step 3 (Parent)
-  3: { requiredChecks: ["consent.terms", "consent.truth"] }, // Step 4 (Consent)
-  4: {}, // Step 5 (Thank you)
+  0: { required: ["child.firstName", "child.lastName", "child.dob"] },
+  1: { required: ["therapy.toBeFunded"] },
+  2: { required: ["parent1.firstName", "parent1.lastName", "parent1.email"] },
+  3: { requiredChecks: ["consent.terms", "consent.truth"] },
+  4: {}, // Thank you
 };
 
 function isEmail(v) {
@@ -68,7 +69,6 @@ function clearInvalid(container) {
 }
 
 function markInvalid(el) {
-  if (!el) return;
   el.classList.add("is-invalid");
   el.setAttribute("aria-invalid", "true");
   const remove = () => el.classList.remove("is-invalid");
@@ -76,11 +76,9 @@ function markInvalid(el) {
   el.addEventListener("change", remove, { once: true });
 }
 
-function validateStep(stepIndex) {
-  const rules = STEP_RULES[stepIndex] || {};
-  const container = steps[stepIndex];
-  if (!container) return true;
-
+function validateStep(idx) {
+  const rules = STEP_RULES[idx] || {};
+  const container = steps[idx];
   clearInvalid(container);
 
   const missing = [];
@@ -88,33 +86,32 @@ function validateStep(stepIndex) {
 
   (rules.required || []).forEach((name) => {
     const el = container.querySelector(`[name="${name}"]`);
-    if (!el) return;
-    const val = el ? String(el.value ?? "").trim() : "";
+    const val = el
+      ? name === "parent1.email"
+        ? el.value.trim()
+        : el.value.trim()
+      : "";
     const ok = name === "parent1.email" ? isEmail(val) : val.length > 0;
     if (!ok) {
       missing.push(LABEL[name] || name);
       markInvalid(el);
-      if (!firstInvalid) firstInvalid = el;
+      firstInvalid ||= el;
     }
   });
 
   (rules.requiredChecks || []).forEach((name) => {
     const el = container.querySelector(`[name="${name}"]`);
-    if (!el) return;
-    const ok = !!el.checked;
-    if (!ok) {
+    if (el && !el.checked) {
       missing.push(LABEL[name] || name);
       markInvalid(el);
-      if (!firstInvalid) firstInvalid = el;
+      firstInvalid ||= el;
     }
   });
 
   if (missing.length) {
     showToast(`Please complete: ${missing.join(", ")}.`);
-    if (firstInvalid && firstInvalid.scrollIntoView) {
-      firstInvalid.scrollIntoView({ behavior: "smooth", block: "center" });
-      firstInvalid.focus?.();
-    }
+    firstInvalid?.scrollIntoView({ behavior: "smooth", block: "center" });
+    firstInvalid?.focus();
     return false;
   }
   return true;
@@ -127,6 +124,9 @@ function showStep(n) {
   document.querySelector('button[onclick="nextStep(1)"]').style.display =
     n >= steps.length - 2 ? "none" : "inline-block";
   submitBtn.style.display = n === steps.length - 2 ? "inline-block" : "none";
+
+  // **Nueva línea**: ocultar Save al llegar al último paso
+  saveBtn.style.display = n === steps.length - 1 ? "none" : "inline-block";
 }
 
 function nextStep(n) {
@@ -134,6 +134,7 @@ function nextStep(n) {
   currentStep += n;
   if (currentStep >= 0 && currentStep < steps.length) showStep(currentStep);
 }
+
 showStep(currentStep);
 
 // token + draft + uploads
