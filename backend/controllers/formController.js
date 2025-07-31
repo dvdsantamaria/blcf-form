@@ -204,14 +204,14 @@ export const saveDraft = async (req, res) => {
         "parent1.lastName",
         "parent1.email",
       ];
-      const missing = requiredMin.filter((f) => !isNonEmpty(body[f]));
-      if (missing.length > 0) {
-        return res.status(400).json({
-          ok: false,
-          error: "Missing required fields in step 0",
-          details: missing,
-        });
-      }
+      // const missing = requiredMin.filter((f) => !isNonEmpty(body[f]));
+      // if (missing.length > 0) {
+      //   return res.status(400).json({
+      //     ok: false,
+      //     error: "Missing required fields in step 0",
+      //     details: missing,
+      //   });
+      // }
       if (!isEmail(body["parent1.email"])) {
         return res.status(400).json({
           ok: false,
