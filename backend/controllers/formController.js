@@ -1,6 +1,7 @@
 // backend/controllers/formController.js
 import "dotenv/config";
 import crypto from "crypto";
+import express from "express";
 import {
   S3Client,
   PutObjectCommand,
@@ -240,3 +241,10 @@ export const handleFormSubmission = async (req, res) => {
     return res.status(500).json({ ok: false, error: "Internal Server Error" });
   }
 };
+
+const router = express.Router();
+
+router.post("/save-draft", saveDraft);
+router.post("/submit", handleFormSubmission);
+
+export default router;

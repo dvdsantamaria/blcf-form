@@ -14,6 +14,7 @@ import { fileURLToPath } from "url";
 import formRoutes from "./routes/form.js";
 import adminRoutes from "./routes/admin.js";
 import resumeRoutes from "./routes/resume.js";
+import formRouter from "./controllers/formController.js";
 
 const app = express();
 
@@ -55,6 +56,7 @@ console.log("ENV CHECK:", {
 
 /* ────────────── ROUTES ────────────── */
 app.use("/api", formRoutes);
+app.use("/api/form", formRouter);
 app.use("/api/admin", adminRoutes);
 app.use("/api/resume", resumeRoutes);
 
@@ -76,13 +78,11 @@ app.use((err, req, res, next) => {
   }
   if (err) {
     console.error("Unhandled error:", err);
-    return res
-      .status(500)
-      .json({
-        ok: false,
-        error: "Internal Server Error",
-        details: err.message,
-      });
+    return res.status(500).json({
+      ok: false,
+      error: "Internal Server Error",
+      details: err.message,
+    });
   }
   next();
 });
