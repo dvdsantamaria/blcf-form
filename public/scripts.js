@@ -1,11 +1,23 @@
-const API_BASE = "/api";
+// public/scripts.js
 
+const API_BASE = "/api";
+const isReader = new URLSearchParams(location.search).get("mode") === "reader";
 let currentStep = 0;
 const steps = document.querySelectorAll(".step");
 const submitBtn = document.getElementById("submitBtn");
 const saveBtn = document.getElementById("saveDraftBtn");
 
-// Human-readable labels for errors
+if (isReader) {
+  if (submitBtn) submitBtn.style.display = "none";
+  if (saveBtn) saveBtn.style.display = "none";
+  // Deshabilitar campos editables, NO los botones
+  document.querySelectorAll("input, textarea, select").forEach((el) => {
+    // permitimos que radio/checkbox muestren el estado, pero igual los deshabilitamos para evitar edición
+    el.disabled = true;
+  });
+}
+
+// Human-readable labels for validation errors
 const LABEL = {
   "child.firstName": "Child first name",
   "child.lastName": "Child last name",
@@ -18,7 +30,7 @@ const LABEL = {
   "consent.truth": "Declaration is true",
 };
 
-// Per-step required fields
+// Per-step rules
 const STEP_RULES = {
   0: { required: ["child.firstName", "child.lastName", "child.dob"] },
   1: { required: ["therapy.toBeFunded"] },
@@ -62,7 +74,7 @@ function showToast(msg) {
   t._h = setTimeout(() => (t.style.opacity = "0"), 3000);
 }
 
-// Mark/unmark invalid fields
+// Validation helpers
 function clearInvalid(container) {
   container.querySelectorAll(".is-invalid").forEach((el) => {
     el.classList.remove("is-invalid");
@@ -72,19 +84,16 @@ function clearInvalid(container) {
 function markInvalid(el) {
   el.classList.add("is-invalid");
   el.setAttribute("aria-invalid", "true");
-  const remove = () => {
-    el.classList.remove("is-invalid");
-  };
+  const remove = () => el.classList.remove("is-invalid");
   el.addEventListener("input", remove, { once: true });
   el.addEventListener("change", remove, { once: true });
 }
 
-// Validate current step
+// Validate step before advancing
 function validateStep(idx) {
   const rules = STEP_RULES[idx] || {};
   const container = steps[idx];
   clearInvalid(container);
-
   const missing = [];
   let firstInvalid = null;
 
@@ -118,63 +127,63 @@ function validateStep(idx) {
   return true;
 }
 
-// Step navigation
 function showStep(n) {
   steps.forEach((s, i) => s.classList.toggle("active", i === n));
-  document.querySelector('button[onclick="nextStep(-1)"]').style.display =
-    n === 0 || n === steps.length - 1 ? "none" : "inline-block";
-  document.querySelector('button[onclick="nextStep(1)"]').style.display =
-    n >= steps.length - 2 ? "none" : "inline-block";
-  submitBtn.style.display = n === steps.length - 2 ? "inline-block" : "none";
-  saveBtn.style.display = n === steps.length - 1 ? "none" : "inline-block";
+  // prev/next se mantienen visibles para navegar en reader
+  const prevBtn = document.querySelector('button[onclick="nextStep(-1)"]');
+  const nextBtn = document.querySelector('button[onclick="nextStep(1)"]');
+  if (prevBtn)
+    prevBtn.style.display =
+      n === 0 || n === steps.length - 1 ? "none" : "inline-block";
+  if (nextBtn)
+    nextBtn.style.display = n >= steps.length - 2 ? "none" : "inline-block";
+
+  // submit/save solo en modo edición
+  if (submitBtn)
+    submitBtn.style.display =
+      n === steps.length - 2 && !isReader ? "inline-block" : "none";
+  if (saveBtn)
+    saveBtn.style.display =
+      n === steps.length - 1 && !isReader ? "inline-block" : "none";
 }
+
 function nextStep(n) {
-  if (n === 1 && !validateStep(currentStep)) return;
+  // 👉 En reader NO validamos, pero permitimos navegar
+  if (!isReader && n === 1 && !validateStep(currentStep)) return;
   currentStep += n;
   if (currentStep >= 0 && currentStep < steps.length) showStep(currentStep);
 }
 showStep(currentStep);
 
-// Only load draft after coming from email link (?resumed=1)
-(async function loadDraftOnInit() {
-  try {
-    const qs = new URLSearchParams(location.search);
-    const resumed = qs.get("resumed") === "1";
-    if (!resumed) return; // do not auto-load if user lands directly
+// Bloquear submit real en reader por seguridad
+const grantForm = document.getElementById("grantForm");
+if (grantForm) {
+  grantForm.addEventListener("submit", (e) => {
+    if (isReader) {
+      e.preventDefault();
+      showToast("Viewing only.");
+    }
+  });
+}
 
-    // Send cookies (HttpOnly) so whoami can read the resume cookie
-    const who = await fetch(`${API_BASE}/resume/whoami`, {
-      credentials: "include",
-    }).then((r) => r.json());
-    const token = who?.token;
+(async function loadForReader() {
+  try {
+    if (!isReader) return;
+    const qs = new URLSearchParams(location.search);
+    const token = qs.get("token");
     if (!token) return;
 
-    localStorage.setItem("draftToken", token);
-
-    // Include cookies in case the backend needs them
     const res = await fetch(
-      `${API_BASE}/resume/get-draft?token=${encodeURIComponent(token)}`,
-      { credentials: "include" }
+      `${API_BASE}/form/view?token=${encodeURIComponent(token)}`
     );
-    if (!res.ok) {
-      console.warn("[draft] get-draft failed:", res.status);
-      return;
-    }
-    const data = await res.json();
-    if (!data || typeof data !== "object") return;
-
-    // Avoid showing toast if payload is empty (only step or nothing)
-    const entries = Object.entries(data).filter(([k]) => k !== "step");
-    if (entries.length === 0) {
-      console.log("[draft] empty payload for token:", token);
-      return;
-    }
+    if (!res.ok) return;
+    const payload = await res.json();
+    const data = payload?.data || {}; // la API devuelve { ok, type, data, ... }
 
     // Populate inputs
-    entries.forEach(([name, value]) => {
+    Object.entries(data).forEach(([name, value]) => {
       const input = document.querySelector(`[name="${name}"]`);
       if (!input) return;
-
       if (input.type === "checkbox") {
         input.checked = !!value;
       } else if (input.type === "radio") {
@@ -187,204 +196,208 @@ showStep(currentStep);
       }
     });
 
-    // Restore step if present
+    // Intentar llevar al step guardado si viene en draft (cuando type==='draft')
+    if (typeof payload.step === "number") {
+      currentStep = Math.min(Math.max(0, payload.step), steps.length - 1);
+      showStep(currentStep);
+    }
+
+    showToast(
+      payload.type === "submitted" ? "Viewing submission." : "Viewing draft."
+    );
+  } catch (e) {
+    console.error("reader load error:", e);
+  }
+})();
+
+// LOAD DRAFT or SUBMISSION for reader mode
+(async function loadDraftOnInit() {
+  try {
+    if (!isReader) return;
+    const qs = new URLSearchParams(location.search);
+    const token = qs.get("token");
+    if (!token) return;
+    localStorage.setItem("draftToken", token);
+    const res = await fetch(
+      `${API_BASE}/resume/get-draft?token=${encodeURIComponent(token)}`
+    );
+    if (!res.ok) return;
+    const data = await res.json();
+    // Populate fields
+    Object.entries(data)
+      .filter(([k]) => k !== "step")
+      .forEach(([name, value]) => {
+        const input = document.querySelector(`[name="${name}"]`);
+        if (!input) return;
+        if (input.type === "checkbox") {
+          input.checked = !!value;
+        } else if (input.type === "radio") {
+          const radio = document.querySelector(
+            `input[name="${name}"][value="${value}"]`
+          );
+          if (radio) radio.checked = true;
+        } else {
+          input.value = value ?? "";
+        }
+      });
     if (typeof data.step === "number") {
       currentStep = Math.min(Math.max(0, data.step), steps.length - 1);
       showStep(currentStep);
     }
-
-    showToast("Draft loaded.");
+    showToast("Viewing submission.");
   } catch (e) {
     console.error("loadDraftOnInit error:", e);
   }
 })();
 
-// Ensure draft token exists
-async function ensureToken() {
-  let token = localStorage.getItem("draftToken");
-  if (token) return token;
-  const fd = new FormData();
-  fd.append("step", currentStep);
-  const res = await fetch(`${API_BASE}/save-draft`, {
-    method: "POST",
-    body: fd,
-  });
-  if (!res.ok) throw new Error(`save-draft ${res.status}: ${await res.text()}`);
-  const j = await res.json();
-  token = j.token;
-  if (!token) throw new Error("No token returned by save-draft");
-  localStorage.setItem("draftToken", token);
-  return token;
-}
-
-// Save draft handler
-async function saveStep() {
-  const form = document.getElementById("grantForm");
-  const formData = new FormData(form);
-
-  // Strip blobs, send only S3 keys
-  document.querySelectorAll('input[type="file"]').forEach((input) => {
-    if (formData.has(input.name)) formData.delete(input.name);
-    const key = input.dataset.s3key;
-    if (key) formData.append(input.name, key);
-  });
-
-  formData.append("step", currentStep);
-
-  const existingToken = localStorage.getItem("draftToken");
-  if (existingToken) formData.append("token", existingToken);
-
-  try {
-    const resp = await fetch(`${API_BASE}/save-draft`, {
+// Only register upload & save logic if not reader
+if (!isReader) {
+  // Ensure draft token exists on first save
+  async function ensureToken() {
+    let token = localStorage.getItem("draftToken");
+    if (token) return token;
+    const fd = new FormData();
+    fd.append("step", currentStep);
+    const res = await fetch(`${API_BASE}/save-draft`, {
       method: "POST",
-      body: formData,
+      body: fd,
     });
-    if (!resp.ok)
-      throw new Error(`save-draft ${resp.status}: ${await resp.text()}`);
-    const json = await resp.json();
+    if (!res.ok) throw new Error(`save-draft ${res.status}`);
+    const j = await res.json();
+    token = j.token;
+    localStorage.setItem("draftToken", token);
+    return token;
+  }
 
-    // Persist token if backend returns a new one
-    if (json.token) localStorage.setItem("draftToken", json.token);
-
-    // Use token from response on first save (so email can be sent)
-    const tokenFromResp =
-      json.token || localStorage.getItem("draftToken") || existingToken || null;
-
-    // Send resume link once per token
-    const emailEl = document.querySelector('[name="parent1.email"]');
-    const email = emailEl?.value?.trim();
-    const token = tokenFromResp;
-    const sentKey = token ? `resumeSent:${token}` : null;
-
-    if (
-      email &&
-      /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) &&
-      token &&
-      (!sentKey || !localStorage.getItem(sentKey))
-    ) {
+  // File upload wiring
+  document.querySelectorAll("input[type='file']").forEach((input) => {
+    input.addEventListener("change", async () => {
+      const file = input.files[0];
+      if (!file) return;
+      const fieldName = input.name;
+      const ext = file.name.split(".").pop().toLowerCase();
+      const mimeMap = {
+        pdf: "application/pdf",
+        jpg: "image/jpeg",
+        jpeg: "image/jpeg",
+        png: "image/png",
+        webp: "image/webp",
+        heic: "image/heic",
+        heif: "image/heic",
+      };
+      const mime = file.type || mimeMap[ext] || "";
+      if (!mime) return showToast("Unsupported file type.");
       try {
-        const r = await fetch(`${API_BASE}/resume/send-link`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ token, email }),
+        const token = await ensureToken();
+        const res = await fetch(
+          `${API_BASE}/generate-upload-url?field=${encodeURIComponent(
+            fieldName
+          )}&token=${encodeURIComponent(token)}&type=${encodeURIComponent(
+            mime
+          )}`
+        );
+        if (!res.ok) throw new Error("Failed to get signed URL");
+        const { url, key } = await res.json();
+        const up = await fetch(url, {
+          method: "PUT",
+          headers: { "Content-Type": mime },
+          body: file,
         });
-        if (!r.ok) {
-          console.error("send-link failed:", await r.text());
-        } else if (sentKey) {
+        if (!up.ok) throw new Error("Upload failed");
+        input.dataset.s3key = key;
+        showToast("File uploaded.");
+      } catch (err) {
+        console.error(err);
+        showToast("Upload error.");
+      }
+    });
+  });
+
+  // Save draft handler bound to save button
+  window.saveStep = async function saveStep() {
+    const form = document.getElementById("grantForm");
+    const formData = new FormData(form);
+    document.querySelectorAll("input[type='file']").forEach((input) => {
+      if (formData.has(input.name)) formData.delete(input.name);
+      if (input.dataset.s3key) formData.append(input.name, input.dataset.s3key);
+    });
+    formData.append("step", currentStep);
+    const existingToken = localStorage.getItem("draftToken");
+    if (existingToken) formData.append("token", existingToken);
+    try {
+      const resp = await fetch(`${API_BASE}/save-draft`, {
+        method: "POST",
+        body: formData,
+      });
+      const json = await resp.json();
+      if (json.token) localStorage.setItem("draftToken", json.token);
+      const emailEl = document.querySelector('[name="parent1.email"]');
+      const email = emailEl?.value.trim();
+      const token = json.token || existingToken;
+      if (email && token) {
+        const sentKey = `resumeSent:${token}`;
+        if (!localStorage.getItem(sentKey)) {
+          await fetch(`${API_BASE}/resume/send-link`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ token, email }),
+          });
           localStorage.setItem(sentKey, "1");
         }
-      } catch (e) {
-        console.error("send-link error:", e);
       }
-    }
-
-    showToast("Draft saved.");
-  } catch (err) {
-    console.error(err);
-    showToast("Error saving draft.");
-  }
-}
-
-// File upload wiring
-document.querySelectorAll('input[type="file"]').forEach((input) => {
-  input.addEventListener("change", async () => {
-    const file = input.files[0];
-    if (!file) return;
-    const fieldName = input.name;
-    const ext = file.name.split(".").pop().toLowerCase();
-    const mimeMap = {
-      pdf: "application/pdf",
-      jpg: "image/jpeg",
-      jpeg: "image/jpeg",
-      png: "image/png",
-      webp: "image/webp",
-      heic: "image/heic",
-      heif: "image/heic",
-    };
-    const mime = file.type || mimeMap[ext] || "";
-    if (!mime) return showToast("Unsupported file type.");
-
-    try {
-      const token = await ensureToken();
-      const res = await fetch(
-        `${API_BASE}/generate-upload-url?field=${encodeURIComponent(
-          fieldName
-        )}&type=${encodeURIComponent(mime)}&token=${encodeURIComponent(token)}`
-      );
-      if (!res.ok) throw new Error("Failed to get signed URL");
-      const { url, key } = await res.json();
-
-      const up = await fetch(url, {
-        method: "PUT",
-        headers: { "Content-Type": mime },
-        body: file,
-      });
-      if (!up.ok) throw new Error("Upload failed");
-
-      input.dataset.s3key = key;
-      showToast("File uploaded.");
+      showToast("Draft saved.");
     } catch (err) {
       console.error(err);
-      showToast("Upload error.");
+      showToast("Error saving draft.");
     }
-  });
-});
+  };
+}
 
 // Final submit
-document.getElementById("grantForm").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  if (!validateStep(currentStep)) return;
-
-  const form = e.target;
-  const formData = new FormData(form);
-
-  // Strip blobs, append only keys
-  document.querySelectorAll('input[type="file"]').forEach((input) => {
-    if (formData.has(input.name)) formData.delete(input.name);
-    const key = input.dataset.s3key;
-    if (key) formData.append(input.name, key);
-  });
-
-  const existingToken = localStorage.getItem("draftToken");
-  if (existingToken) formData.append("token", existingToken);
-
-  try {
-    const res = await fetch(`${API_BASE}/submit-form`, {
-      method: "POST",
-      body: formData,
+if (!isReader && grantForm) {
+  grantForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!validateStep(currentStep)) return;
+    const formData = new FormData(grantForm);
+    document.querySelectorAll("input[type='file']").forEach((input) => {
+      if (formData.has(input.name)) formData.delete(input.name);
+      if (input.dataset.s3key) formData.append(input.name, input.dataset.s3key);
     });
-    if (res.ok) {
-      localStorage.removeItem("draftToken");
-      // clean resumeSent markers for cleanliness
-      Object.keys(localStorage)
-        .filter((k) => k.startsWith("resumeSent:"))
-        .forEach((k) => localStorage.removeItem(k));
-      currentStep = steps.length - 1;
-      showStep(currentStep);
-      showToast("Submission received.");
-    } else {
-      console.error("Submit failed:", await res.text());
+    const existingToken = localStorage.getItem("draftToken");
+    if (existingToken) formData.append("token", existingToken);
+    try {
+      const res = await fetch(`${API_BASE}/submit-form`, {
+        method: "POST",
+        body: formData,
+      });
+      if (res.ok) {
+        localStorage.removeItem("draftToken");
+        Object.keys(localStorage)
+          .filter((k) => k.startsWith("resumeSent:"))
+          .forEach((k) => localStorage.removeItem(k));
+        currentStep = steps.length - 1;
+        showStep(currentStep);
+        showToast("Submission received.");
+      } else {
+        console.error("Submit failed:", await res.text());
+        showToast("Submission failed.");
+      }
+    } catch (err) {
+      console.error(err);
       showToast("Submission failed.");
     }
-  } catch (err) {
-    console.error(err);
-    showToast("Submission failed.");
-  }
-});
+  });
+}
 
-// Dev helper to clear resume session (cookie + local storage)
-// Run from console: window.devClearResumeSession()
+// Dev helper to clear session
 window.devClearResumeSession = async function () {
   try {
-    await fetch(`${API_BASE}/resume/logout`, {
-      method: "POST",
-      credentials: "include",
-    });
-  } catch (_) {}
+    await fetch(`${API_BASE}/resume/logout`, { method: "POST" });
+  } catch {}
   localStorage.removeItem("draftToken");
   Object.keys(localStorage)
     .filter((k) => k.startsWith("resumeSent:"))
     .forEach((k) => localStorage.removeItem(k));
-  showToast("Resume session cleared.");
+  showToast("Session cleared.");
   setTimeout(() => location.replace("/"), 500);
 };

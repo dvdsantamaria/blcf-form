@@ -5,24 +5,24 @@ import multer from "multer";
 import {
   generateUploadUrl,
   saveDraft,
-  getDraft,
   handleFormSubmission,
+  getViewData, // ✅ importar el handler correcto
 } from "../controllers/formController.js";
 
 const router = express.Router();
-const upload = multer(); // For form-data bodies without files
+const upload = multer();
 
-// Generate pre-signed URL for S3 upload
+// Presigned
 router.get("/generate-upload-url", generateUploadUrl);
 
-// Save draft form (no file handling required)
+// Draft
 router.post("/save-draft", upload.none(), saveDraft);
 
-// Retrieve saved draft
-router.get("/get-draft", getDraft);
+// Reader view (tokenizado)
+router.get("/view", getViewData); // ✅ usar getViewData
 
-// Submit final form (also no file in body, files are on S3)
-router.post("/submit-form", (req, res, next) => {
+// Submit final
+router.post("/submit-form", (req, res) => {
   upload.none()(req, res, (err) => {
     if (err) {
       return res.status(400).json({

@@ -1,19 +1,17 @@
+// backend/controllers/formController.js
 import "dotenv/config";
 import crypto from "crypto";
-import express from "express";
 import {
   S3Client,
   PutObjectCommand,
   GetObjectCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
 import FormSubmission from "../models/FormSubmission.js";
 import FormDraft from "../models/FormDraft.js";
+import { sendSubmissionMail } from "../utils/mailer.js";
 
-/**
- * AWS clients
- */
+// ───────────────── AWS clients ─────────────────
 const s3 = new S3Client({
   region: process.env.AWS_REGION,
   credentials: {
@@ -21,10 +19,6 @@ const s3 = new S3Client({
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
   },
 });
-
-const ses = process.env.SES_FROM
-  ? new SESClient({ region: process.env.AWS_REGION })
-  : null;
 
 const BUCKET = process.env.AWS_S3_BUCKET || process.env.AWS_BUCKET_NAME;
 
@@ -34,9 +28,7 @@ const kmsParams = process.env.AWS_KMS_KEY_ID
 
 const EMAIL_RX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-/**
- * Safe getter for dotted paths (eg. parent1.email)
- */
+// ───────────────── Helpers ─────────────────
 function getField(body, dottedPath) {
   if (!body) return undefined;
   if (Object.prototype.hasOwnProperty.call(body, dottedPath))
@@ -46,9 +38,6 @@ function getField(body, dottedPath) {
   }, body);
 }
 
-/**
- * Extract S3 file keys already uploaded (we store references only)
- */
 function extractFileKeysFromBody(body) {
   const keys = [];
   for (const [k, v] of Object.entries(body || {})) {
@@ -62,62 +51,28 @@ function extractFileKeysFromBody(body) {
   return keys;
 }
 
-/**
- * Put JSON to S3 with optional KMS
- */
+async function streamToString(stream) {
+  const chunks = [];
+  for await (const chunk of stream) chunks.push(chunk);
+  return Buffer.concat(chunks).toString("utf8");
+}
+
 async function putJsonToS3(key, obj) {
   const body = JSON.stringify(obj);
   console.log("[putJsonToS3] Uploading", { key, size: body.length });
-  const cmd = new PutObjectCommand({
-    Bucket: BUCKET,
-    Key: key,
-    Body: body,
-    ContentType: "application/json",
-    ...kmsParams,
-  });
-  await s3.send(cmd);
+  await s3.send(
+    new PutObjectCommand({
+      Bucket: BUCKET,
+      Key: key,
+      Body: body,
+      ContentType: "application/json",
+      ...kmsParams,
+    })
+  );
   return key;
 }
 
-/**
- * Send email via SES (safe no-throw)
- */
-async function safeSendEmail(to, subject, text) {
-  try {
-    if (!ses) {
-      console.warn("SES client not initialized.");
-      return;
-    }
-    if (!process.env.SES_FROM) {
-      console.warn("SES_FROM not set.");
-      return;
-    }
-    if (!to) {
-      console.warn("No destination email provided.");
-      return;
-    }
-
-    const params = {
-      Destination: { ToAddresses: [to] },
-      Source: process.env.SES_FROM,
-      Message: {
-        Subject: { Data: subject },
-        Body: { Text: { Data: text } },
-      },
-    };
-
-    console.log("[safeSendEmail] Sending email:", params);
-    const result = await ses.send(new SendEmailCommand(params));
-    console.log("[safeSendEmail] Email sent successfully:", result.MessageId);
-  } catch (e) {
-    console.warn("SES send failed:", e?.message || e);
-  }
-}
-
-/**
- * POST /api/save-draft
- * Saves current step and data to S3 + upserts FormDraft
- */
+// ───────────────── SAVE DRAFT ─────────────────
 export const saveDraft = async (req, res) => {
   try {
     const body = req.body || {};
@@ -178,10 +133,7 @@ export const saveDraft = async (req, res) => {
   }
 };
 
-/**
- * POST /api/submit-form
- * Final submission to S3 + upserts FormSubmission and finalizes draft
- */
+// ───────────────── SUBMIT (FINAL) ─────────────────
 export const handleFormSubmission = async (req, res) => {
   try {
     const body = req.body || {};
@@ -194,7 +146,7 @@ export const handleFormSubmission = async (req, res) => {
         : crypto.randomBytes(16).toString("base64url");
 
     const emailRaw = getField(body, "parent1.email") || getField(body, "email");
-    const email =
+    const patientEmail =
       typeof emailRaw === "string" && EMAIL_RX.test(emailRaw.trim())
         ? emailRaw.trim()
         : null;
@@ -220,7 +172,7 @@ export const handleFormSubmission = async (req, res) => {
           s3Key: finalKey,
           status: "submitted",
           fileKeys,
-          ...(email ? { email } : {}),
+          ...(patientEmail ? { email: patientEmail } : {}),
           lastActivityAt: now,
         },
       },
@@ -234,23 +186,27 @@ export const handleFormSubmission = async (req, res) => {
           finalizedAt: now,
           status: "finalized",
           lastActivityAt: now,
-          ...(email ? { email } : {}),
+          ...(patientEmail ? { email: patientEmail } : {}),
         },
       },
       { upsert: true }
     );
 
-    if (email) {
-      const base = process.env.PUBLIC_BASE_URL || "";
-      const link = base
-        ? `${base}/?resumeToken=${encodeURIComponent(token)}`
-        : token;
-      await safeSendEmail(
-        email,
-        "BLCF – Hemos recibido tu solicitud",
-        `Gracias por tu envío.\n\nToken de referencia: ${token}\nReanudar/consultar: ${link}\n\n(SES sandbox: recuerda verificar este destinatario)`
-      );
+    // ── Emails (paciente + admins) usando utils/mailer.js
+    if (patientEmail) {
+      await sendSubmissionMail({ to: patientEmail, token, role: "user" });
     }
+
+    const admins = (process.env.ADMIN_NOTIFY_TO || process.env.NOTIFY_TO || "")
+      .split(/[,;]\s*/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    await Promise.all(
+      admins.map((adminEmail) =>
+        sendSubmissionMail({ to: adminEmail, token, role: "admin" })
+      )
+    );
 
     console.log("✅ Submission saved:", token);
     return res.status(200).json({ ok: true, token, s3Key: finalKey });
@@ -260,10 +216,7 @@ export const handleFormSubmission = async (req, res) => {
   }
 };
 
-/**
- * GET /api/generate-upload-url
- * Generates presigned URL (supports field or filename)
- */
+// ───────────────── PRESIGNED URL ─────────────────
 export const generateUploadUrl = async (req, res) => {
   try {
     const { token, filename, type, field } = req.query;
@@ -285,14 +238,16 @@ export const generateUploadUrl = async (req, res) => {
 
     console.log("[presign] token:", token, "key:", key);
 
-    const cmd = new PutObjectCommand({
-      Bucket: BUCKET,
-      Key: key,
-      ContentType: type,
-      ...kmsParams,
-    });
-
-    const url = await getSignedUrl(s3, cmd, { expiresIn: 3600 });
+    const url = await getSignedUrl(
+      s3,
+      new PutObjectCommand({
+        Bucket: BUCKET,
+        Key: key,
+        ContentType: type,
+        ...kmsParams,
+      }),
+      { expiresIn: 3600 }
+    );
     return res.status(200).json({ ok: true, url, key });
   } catch (err) {
     console.error("generateUploadUrl error:", err);
@@ -300,42 +255,51 @@ export const generateUploadUrl = async (req, res) => {
   }
 };
 
-/**
- * GET /api/get-draft
- * Reads last draft from S3 (used only in some flows)
- */
-export const getDraft = async (req, res) => {
+// ───────────────── VIEW DATA (reader) ─────────────────
+export const getViewData = async (req, res) => {
   try {
-    const { token } = req.query;
+    const { token } = req.query || {};
     if (!token)
       return res.status(400).json({ ok: false, error: "Missing token" });
 
-    const cmd = new GetObjectCommand({
-      Bucket: BUCKET,
-      Key: `submissions/${token}/drafts/current.json`,
+    // 1) Intentar final
+    const finalKey = `submissions/${token}/final/submission.json`;
+    try {
+      const obj = await s3.send(
+        new GetObjectCommand({ Bucket: BUCKET, Key: finalKey })
+      );
+      const text = await streamToString(obj.Body);
+      const json = JSON.parse(text);
+      return res.json({
+        ok: true,
+        type: "submitted",
+        token,
+        submittedAt: json.submittedAt,
+        data: json.data || {},
+        fileKeys: json.fileKeys || [],
+      });
+    } catch (_) {
+      // sigue a draft
+    }
+
+    // 2) Draft actual
+    const draftKey = `submissions/${token}/drafts/current.json`;
+    const obj = await s3.send(
+      new GetObjectCommand({ Bucket: BUCKET, Key: draftKey })
+    );
+    const text = await streamToString(obj.Body);
+    const json = JSON.parse(text);
+    return res.json({
+      ok: true,
+      type: "draft",
+      token,
+      step: json.step,
+      updatedAt: json.updatedAt,
+      data: json.data || {},
+      fileKeys: json.fileKeys || [],
     });
-
-    const draft = await s3.send(cmd);
-    const chunks = [];
-    for await (const chunk of draft.Body) chunks.push(chunk);
-
-    const raw = Buffer.concat(chunks).toString("utf8");
-    const json = JSON.parse(raw);
-
-    return res.status(200).json({ ok: true, draft: json });
   } catch (err) {
-    console.error("getDraft error:", err);
-    return res.status(404).json({ ok: false, error: "Draft not found" });
+    console.error("getViewData error:", err);
+    return res.status(404).json({ ok: false, error: "Not found" });
   }
 };
-
-/**
- * Router export (mounted under /api in server.js)
- */
-const router = express.Router();
-router.post("/save-draft", saveDraft);
-router.post("/submit-form", handleFormSubmission);
-router.get("/generate-upload-url", generateUploadUrl);
-router.get("/get-draft", getDraft);
-
-export default router;
