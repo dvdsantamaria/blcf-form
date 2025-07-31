@@ -33,6 +33,8 @@ function isEmail(s) {
   return typeof s === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
 }
 
+console.log("[sendResumeLink] email:", email, "token:", token);
+
 const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || "").replace(/\/$/, "");
 const BACKEND_BASE_URL = (process.env.BACKEND_BASE_URL || "").replace(
   /\/$/,
@@ -101,6 +103,8 @@ export async function sendResumeLink(req, res) {
         exchangeUrl
       );
     }
+
+    console.log("[sendResumeLink] SES sent ok to:", email);
 
     // Guarda email en draft
     await FormDraft.findOneAndUpdate(

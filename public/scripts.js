@@ -1,4 +1,3 @@
-// frontend/scripts.js
 const API_BASE = "/api";
 
 let currentStep = 0;
@@ -25,7 +24,7 @@ const STEP_RULES = {
   1: { required: ["therapy.toBeFunded"] },
   2: { required: ["parent1.firstName", "parent1.lastName", "parent1.email"] },
   3: { requiredChecks: ["consent.terms", "consent.truth"] },
-  4: {}, // Thank you
+  4: {},
 };
 
 function isEmail(v) {
@@ -127,7 +126,6 @@ function showStep(n) {
   document.querySelector('button[onclick="nextStep(1)"]').style.display =
     n >= steps.length - 2 ? "none" : "inline-block";
   submitBtn.style.display = n === steps.length - 2 ? "inline-block" : "none";
-  // Hide Save on last step
   saveBtn.style.display = n === steps.length - 1 ? "none" : "inline-block";
 }
 function nextStep(n) {
@@ -140,21 +138,25 @@ showStep(currentStep);
 // Load draft when coming from email resume link (cookie-based)
 (async function loadDraftOnInit() {
   try {
-    const who = await fetch(`${API_BASE}/resume/whoami`).then((r) => r.json());
+    // Send cookies (HttpOnly) so whoami can read the resume cookie
+    const who = await fetch(`${API_BASE}/resume/whoami`, {
+      credentials: "include",
+    }).then((r) => r.json());
     const token = who?.token;
-    if (!token) return; // no cookie, nada que cargar
+    if (!token) return;
 
-    // Guardamos token localmente para futuras guardas
     localStorage.setItem("draftToken", token);
 
+    // Include cookies in case the backend needs them
     const res = await fetch(
-      `${API_BASE}/resume/get-draft?token=${encodeURIComponent(token)}`
+      `${API_BASE}/resume/get-draft?token=${encodeURIComponent(token)}`,
+      { credentials: "include" }
     );
     if (!res.ok) return;
     const data = await res.json();
     if (!data || typeof data !== "object") return;
 
-    // Poblar campos (text, checkbox, radio)
+    // Populate inputs
     Object.entries(data).forEach(([name, value]) => {
       const input = document.querySelector(`[name="${name}"]`);
       if (!input) return;
@@ -171,7 +173,7 @@ showStep(currentStep);
       }
     });
 
-    // Si viene step, vamos a ese paso
+    // Restore step if present
     if (typeof data.step === "number") {
       currentStep = Math.min(Math.max(0, data.step), steps.length - 1);
       showStep(currentStep);
@@ -206,7 +208,7 @@ async function saveStep() {
   const form = document.getElementById("grantForm");
   const formData = new FormData(form);
 
-  // 1) quitar blobs y mandar sólo keys S3
+  // Strip blobs, send only S3 keys
   document.querySelectorAll('input[type="file"]').forEach((input) => {
     if (formData.has(input.name)) formData.delete(input.name);
     const key = input.dataset.s3key;
@@ -227,13 +229,17 @@ async function saveStep() {
       throw new Error(`save-draft ${resp.status}: ${await resp.text()}`);
     const json = await resp.json();
 
-    // Asegurar que el token queda guardado
+    // Persist token if backend returns a new one
     if (json.token) localStorage.setItem("draftToken", json.token);
 
-    // 2) Enviar link de reanudación UNA sola vez por token
+    // Use token from response on first save (so email can be sent)
+    const tokenFromResp =
+      json.token || localStorage.getItem("draftToken") || existingToken || null;
+
+    // Send resume link once per token
     const emailEl = document.querySelector('[name="parent1.email"]');
     const email = emailEl?.value?.trim();
-    const token = localStorage.getItem("draftToken");
+    const token = tokenFromResp;
     const sentKey = token ? `resumeSent:${token}` : null;
 
     if (
@@ -242,13 +248,20 @@ async function saveStep() {
       token &&
       (!sentKey || !localStorage.getItem(sentKey))
     ) {
-      fetch("/api/resume/send-link", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, email }),
-      }).then(() => {
-        if (sentKey) localStorage.setItem(sentKey, "1");
-      });
+      try {
+        const r = await fetch(`${API_BASE}/resume/send-link`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token, email }),
+        });
+        if (!r.ok) {
+          console.error("send-link failed:", await r.text());
+        } else if (sentKey) {
+          localStorage.setItem(sentKey, "1");
+        }
+      } catch (e) {
+        console.error("send-link error:", e);
+      }
     }
 
     showToast("Draft saved.");
