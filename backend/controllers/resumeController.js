@@ -51,9 +51,23 @@ const S3_BUCKET =
 /* Send email via SES with clear logs (returns { ok, id } or { ok:false, code, message }) */
 async function sendSesEmail(to, subject, text) {
   try {
+    if (!ses) {
+      console.error("[SES] client not initialized");
+      return {
+        ok: false,
+        code: "NO_SES_CLIENT",
+        message: "SES client not initialized",
+      };
+    }
     if (!process.env.SES_FROM) {
+      console.error("[SES] SES_FROM not set");
       return { ok: false, code: "NO_FROM", message: "SES_FROM not set" };
     }
+    if (!to || !isEmail(to)) {
+      console.error("[SES] invalid recipient:", to);
+      return { ok: false, code: "BAD_TO", message: "Invalid recipient" };
+    }
+
     const cmd = new SendEmailCommand({
       Destination: { ToAddresses: [to] },
       Source: process.env.SES_FROM,
@@ -62,12 +76,10 @@ async function sendSesEmail(to, subject, text) {
         Body: { Text: { Data: text } },
       },
     });
+
+    console.log("[SES] sending", { to, from: process.env.SES_FROM, subject });
     const out = await ses.send(cmd);
-    console.log("[SES] sent", {
-      to,
-      from: process.env.SES_FROM,
-      id: out?.MessageId,
-    });
+    console.log("[SES] sent", { to, id: out?.MessageId });
     return { ok: true, id: out?.MessageId };
   } catch (e) {
     const code = e?.Code || e?.name || "SES_ERROR";
@@ -104,6 +116,7 @@ export async function sendResumeLink(req, res) {
 
     const rt = genToken(24);
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
     await ResumeToken.create({
       resumeToken: rt,
       submissionId: token,
@@ -136,7 +149,8 @@ If you didn't request this, please ignore this email.`;
       { upsert: true }
     );
 
-    return res.json({ ok: true, mail });
+    // Devolvemos exchangeUrl para debug rápido en el front si hace falta
+    return res.json({ ok: true, mail, exchangeUrl });
   } catch (err) {
     console.error("sendResumeLink error:", err);
     return res.status(500).json({ ok: false, error: "Internal Server Error" });
