@@ -6,7 +6,7 @@ const steps = document.querySelectorAll(".step");
 const submitBtn = document.getElementById("submitBtn");
 const saveBtn = document.getElementById("saveDraftBtn");
 
-// labels + per-step rules (0-indexed)
+// Human-readable labels for errors
 const LABEL = {
   "child.firstName": "Child first name",
   "child.lastName": "Child last name",
@@ -19,6 +19,7 @@ const LABEL = {
   "consent.truth": "Declaration is true",
 };
 
+// Per-step required fields
 const STEP_RULES = {
   0: { required: ["child.firstName", "child.lastName", "child.dob"] },
   1: { required: ["therapy.toBeFunded"] },
@@ -31,6 +32,7 @@ function isEmail(v) {
   return !!v && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
 }
 
+// Toast helper
 function showToast(msg) {
   let t = document.getElementById("toast");
   if (!t) {
@@ -61,21 +63,24 @@ function showToast(msg) {
   t._h = setTimeout(() => (t.style.opacity = "0"), 3000);
 }
 
+// Mark/unmark invalid fields
 function clearInvalid(container) {
   container.querySelectorAll(".is-invalid").forEach((el) => {
     el.classList.remove("is-invalid");
     el.removeAttribute("aria-invalid");
   });
 }
-
 function markInvalid(el) {
   el.classList.add("is-invalid");
   el.setAttribute("aria-invalid", "true");
-  const remove = () => el.classList.remove("is-invalid");
+  const remove = () => {
+    el.classList.remove("is-invalid");
+  };
   el.addEventListener("input", remove, { once: true });
   el.addEventListener("change", remove, { once: true });
 }
 
+// Validate current step
 function validateStep(idx) {
   const rules = STEP_RULES[idx] || {};
   const container = steps[idx];
@@ -86,11 +91,8 @@ function validateStep(idx) {
 
   (rules.required || []).forEach((name) => {
     const el = container.querySelector(`[name="${name}"]`);
-    const val = el
-      ? name === "parent1.email"
-        ? el.value.trim()
-        : el.value.trim()
-      : "";
+    if (!el) return;
+    const val = el.value.trim();
     const ok = name === "parent1.email" ? isEmail(val) : val.length > 0;
     if (!ok) {
       missing.push(LABEL[name] || name);
@@ -117,6 +119,7 @@ function validateStep(idx) {
   return true;
 }
 
+// Step navigation
 function showStep(n) {
   steps.forEach((s, i) => s.classList.toggle("active", i === n));
   document.querySelector('button[onclick="nextStep(-1)"]').style.display =
@@ -124,49 +127,50 @@ function showStep(n) {
   document.querySelector('button[onclick="nextStep(1)"]').style.display =
     n >= steps.length - 2 ? "none" : "inline-block";
   submitBtn.style.display = n === steps.length - 2 ? "inline-block" : "none";
-
-  // **Nueva línea**: ocultar Save al llegar al último paso
+  // Hide Save on last step
   saveBtn.style.display = n === steps.length - 1 ? "none" : "inline-block";
 }
-
 function nextStep(n) {
   if (n === 1 && !validateStep(currentStep)) return;
   currentStep += n;
   if (currentStep >= 0 && currentStep < steps.length) showStep(currentStep);
 }
-
 showStep(currentStep);
 
-// token + draft + uploads
+// Ensure draft token exists
 async function ensureToken() {
   let token = localStorage.getItem("draftToken");
   if (token) return token;
   const fd = new FormData();
   fd.append("step", currentStep);
-  const r = await fetch(`${API_BASE}/save-draft`, { method: "POST", body: fd });
-  if (!r.ok) throw new Error(`save-draft ${r.status}: ${await r.text()}`);
-  const j = await r.json();
-  token = j?.token;
+  const res = await fetch(`${API_BASE}/save-draft`, {
+    method: "POST",
+    body: fd,
+  });
+  if (!res.ok) throw new Error(`save-draft ${res.status}: ${await res.text()}`);
+  const j = await res.json();
+  token = j.token;
   if (!token) throw new Error("No token returned by save-draft");
   localStorage.setItem("draftToken", token);
   return token;
 }
 
+// Save draft handler
 async function saveStep() {
   const form = document.getElementById("grantForm");
   const formData = new FormData(form);
 
-  // *** FIX: borrar blobs de los inputs file del FormData ***
+  // Remove any File blobs so multer doesn’t choke
   document.querySelectorAll('input[type="file"]').forEach((input) => {
     if (formData.has(input.name)) {
-      formData.delete(input.name); // elimina TODAS las entradas con ese nombre
+      formData.delete(input.name);
     }
   });
 
-  // luego agregamos SOLO la S3 key como string
+  // Append only S3 keys
   document.querySelectorAll('input[type="file"]').forEach((input) => {
     const key = input.dataset.s3key;
-    if (key) formData.append(input.name || "file", key);
+    if (key) formData.append(input.name, key);
   });
 
   formData.append("step", currentStep);
@@ -181,7 +185,7 @@ async function saveStep() {
     if (!resp.ok)
       throw new Error(`save-draft ${resp.status}: ${await resp.text()}`);
     const json = await resp.json();
-    if (json?.token) localStorage.setItem("draftToken", json.token);
+    if (json.token) localStorage.setItem("draftToken", json.token);
     showToast("Draft saved.");
   } catch (err) {
     console.error(err);
@@ -189,16 +193,14 @@ async function saveStep() {
   }
 }
 
+// File upload wiring
 document.querySelectorAll('input[type="file"]').forEach((input) => {
-  input.addEventListener("change", async (e) => {
-    const file = e.target.files[0];
+  input.addEventListener("change", async () => {
+    const file = input.files[0];
     if (!file) return;
-
-    // Usar input.name para mapear 1:1 con el backend
-    const fieldName = input.name || "file";
-
-    const ext = (file.name.split(".").pop() || "").toLowerCase();
-    const mimeFallbackByExt = {
+    const fieldName = input.name;
+    const ext = file.name.split(".").pop().toLowerCase();
+    const mimeMap = {
       pdf: "application/pdf",
       jpg: "image/jpeg",
       jpeg: "image/jpeg",
@@ -207,9 +209,8 @@ document.querySelectorAll('input[type="file"]').forEach((input) => {
       heic: "image/heic",
       heif: "image/heic",
     };
-    const mime =
-      (file.type && file.type.trim()) || mimeFallbackByExt[ext] || "";
-    if (!mime) return showToast("Unsupported/unknown file type.");
+    const mime = file.type || mimeMap[ext] || "";
+    if (!mime) return showToast("Unsupported file type.");
 
     try {
       const token = await ensureToken();
@@ -221,22 +222,23 @@ document.querySelectorAll('input[type="file"]').forEach((input) => {
       if (!res.ok) throw new Error("Failed to get signed URL");
       const { url, key } = await res.json();
 
-      const uploadRes = await fetch(url, {
+      const up = await fetch(url, {
         method: "PUT",
         headers: { "Content-Type": mime },
         body: file,
       });
-      if (!uploadRes.ok) throw new Error("Upload failed");
+      if (!up.ok) throw new Error("Upload failed");
 
       input.dataset.s3key = key;
       showToast("File uploaded.");
     } catch (err) {
-      console.error("Upload error:", err);
+      console.error(err);
       showToast("Upload error.");
     }
   });
 });
 
+// Final submit
 document.getElementById("grantForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   if (!validateStep(currentStep)) return;
@@ -244,17 +246,11 @@ document.getElementById("grantForm").addEventListener("submit", async (e) => {
   const form = e.target;
   const formData = new FormData(form);
 
-  // *** FIX: borrar blobs de los inputs file del FormData ***
+  // Strip blobs, append only keys
   document.querySelectorAll('input[type="file"]').forEach((input) => {
-    if (formData.has(input.name)) {
-      formData.delete(input.name);
-    }
-  });
-
-  // y enviar SOLO las S3 keys
-  document.querySelectorAll('input[type="file"]').forEach((input) => {
+    if (formData.has(input.name)) formData.delete(input.name);
     const key = input.dataset.s3key;
-    if (key) formData.append(input.name || "file", key);
+    if (key) formData.append(input.name, key);
   });
 
   const existingToken = localStorage.getItem("draftToken");
@@ -271,12 +267,11 @@ document.getElementById("grantForm").addEventListener("submit", async (e) => {
       showStep(currentStep);
       showToast("Submission received.");
     } else {
-      const txt = await res.text();
-      console.error("Submit failed:", txt);
+      console.error("Submit failed:", await res.text());
       showToast("Submission failed.");
     }
   } catch (err) {
-    console.error("Submit error:", err);
+    console.error(err);
     showToast("Submission failed.");
   }
 });
