@@ -52,6 +52,7 @@ console.log("ENV CHECK:", {
   BUCKET: process.env.AWS_S3_BUCKET || process.env.AWS_BUCKET_NAME,
   REGION: process.env.AWS_REGION,
   ALLOW_ORIGINS: allowedOrigins,
+  ENABLE_SES_TEST: process.env.ENABLE_SES_TEST,
 });
 
 /* ────────────── ROUTES ────────────── */
