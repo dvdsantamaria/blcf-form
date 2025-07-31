@@ -85,6 +85,7 @@ async function sendSesEmail(to, subject, text) {
 /* POST /api/resume/send-link  body: { email, token } */
 export async function sendResumeLink(req, res) {
   try {
+    console.log("[sendResumeLink] body received:", req.body);
     const { email, token } = req.body || {};
     if (!email || !isEmail(email)) {
       return res.status(400).json({ ok: false, error: "Invalid email" });
@@ -127,6 +128,7 @@ ${exchangeUrl}
 If you didn't request this, please ignore this email.`;
 
     const mail = await sendSesEmail(email, subject, text);
+    console.log("[sendResumeLink] SES mail result:", mail);
 
     await FormDraft.findOneAndUpdate(
       { token },

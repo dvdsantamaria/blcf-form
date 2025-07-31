@@ -11,7 +11,9 @@ import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
 import FormSubmission from "../models/FormSubmission.js";
 import FormDraft from "../models/FormDraft.js";
 
-// AWS clients
+/**
+ * AWS clients
+ */
 const s3 = new S3Client({
   region: process.env.AWS_REGION,
   credentials: {
@@ -32,6 +34,9 @@ const kmsParams = process.env.AWS_KMS_KEY_ID
 
 const EMAIL_RX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+/**
+ * Safe getter for dotted paths (eg. parent1.email)
+ */
 function getField(body, dottedPath) {
   if (!body) return undefined;
   if (Object.prototype.hasOwnProperty.call(body, dottedPath))
@@ -41,6 +46,9 @@ function getField(body, dottedPath) {
   }, body);
 }
 
+/**
+ * Extract S3 file keys already uploaded (we store references only)
+ */
 function extractFileKeysFromBody(body) {
   const keys = [];
   for (const [k, v] of Object.entries(body || {})) {
@@ -54,6 +62,9 @@ function extractFileKeysFromBody(body) {
   return keys;
 }
 
+/**
+ * Put JSON to S3 with optional KMS
+ */
 async function putJsonToS3(key, obj) {
   const body = JSON.stringify(obj);
   console.log("[putJsonToS3] Uploading", { key, size: body.length });
@@ -68,25 +79,45 @@ async function putJsonToS3(key, obj) {
   return key;
 }
 
+/**
+ * Send email via SES (safe no-throw)
+ */
 async function safeSendEmail(to, subject, text) {
   try {
-    if (!ses || !process.env.SES_FROM || !to) return;
-    await ses.send(
-      new SendEmailCommand({
-        Destination: { ToAddresses: [to] },
-        Source: process.env.SES_FROM,
-        Message: {
-          Subject: { Data: subject },
-          Body: { Text: { Data: text } },
-        },
-      })
-    );
+    if (!ses) {
+      console.warn("SES client not initialized.");
+      return;
+    }
+    if (!process.env.SES_FROM) {
+      console.warn("SES_FROM not set.");
+      return;
+    }
+    if (!to) {
+      console.warn("No destination email provided.");
+      return;
+    }
+
+    const params = {
+      Destination: { ToAddresses: [to] },
+      Source: process.env.SES_FROM,
+      Message: {
+        Subject: { Data: subject },
+        Body: { Text: { Data: text } },
+      },
+    };
+
+    console.log("[safeSendEmail] Sending email:", params);
+    const result = await ses.send(new SendEmailCommand(params));
+    console.log("[safeSendEmail] Email sent successfully:", result.MessageId);
   } catch (e) {
     console.warn("SES send failed:", e?.message || e);
   }
 }
 
-// SAVE DRAFT
+/**
+ * POST /api/save-draft
+ * Saves current step and data to S3 + upserts FormDraft
+ */
 export const saveDraft = async (req, res) => {
   try {
     const body = req.body || {};
@@ -147,12 +178,16 @@ export const saveDraft = async (req, res) => {
   }
 };
 
-// SUBMIT
+/**
+ * POST /api/submit-form
+ * Final submission to S3 + upserts FormSubmission and finalizes draft
+ */
 export const handleFormSubmission = async (req, res) => {
   try {
     const body = req.body || {};
     const now = new Date();
     const timestamp = now.toISOString();
+
     const token =
       body.token && /^[A-Za-z0-9._~-]{10,}$/.test(body.token)
         ? body.token
@@ -225,7 +260,10 @@ export const handleFormSubmission = async (req, res) => {
   }
 };
 
-// GENERATE PRESIGNED UPLOAD URL (accepts field or filename)
+/**
+ * GET /api/generate-upload-url
+ * Generates presigned URL (supports field or filename)
+ */
 export const generateUploadUrl = async (req, res) => {
   try {
     const { token, filename, type, field } = req.query;
@@ -262,7 +300,10 @@ export const generateUploadUrl = async (req, res) => {
   }
 };
 
-// GET DRAFT (rarely used by front, kept for completeness)
+/**
+ * GET /api/get-draft
+ * Reads last draft from S3 (used only in some flows)
+ */
 export const getDraft = async (req, res) => {
   try {
     const { token } = req.query;
@@ -275,9 +316,8 @@ export const getDraft = async (req, res) => {
     });
 
     const draft = await s3.send(cmd);
-    const stream = draft.Body;
     const chunks = [];
-    for await (const chunk of stream) chunks.push(chunk);
+    for await (const chunk of draft.Body) chunks.push(chunk);
 
     const raw = Buffer.concat(chunks).toString("utf8");
     const json = JSON.parse(raw);
@@ -289,10 +329,12 @@ export const getDraft = async (req, res) => {
   }
 };
 
-// ROUTER
+/**
+ * Router export (mounted under /api in server.js)
+ */
 const router = express.Router();
 router.post("/save-draft", saveDraft);
-router.post("/submit", handleFormSubmission);
+router.post("/submit-form", handleFormSubmission);
 router.get("/generate-upload-url", generateUploadUrl);
 router.get("/get-draft", getDraft);
 
