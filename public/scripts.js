@@ -88,7 +88,7 @@ function validateStep(stepIndex) {
 
   (rules.required || []).forEach((name) => {
     const el = container.querySelector(`[name="${name}"]`);
-    if (!el) return; // don't crash if the field isn't present in this step
+    if (!el) return;
     const val = el ? String(el.value ?? "").trim() : "";
     const ok = name === "parent1.email" ? isEmail(val) : val.length > 0;
     if (!ok) {
@@ -155,9 +155,17 @@ async function saveStep() {
   const form = document.getElementById("grantForm");
   const formData = new FormData(form);
 
+  // *** FIX: borrar blobs de los inputs file del FormData ***
+  document.querySelectorAll('input[type="file"]').forEach((input) => {
+    if (formData.has(input.name)) {
+      formData.delete(input.name); // elimina TODAS las entradas con ese nombre
+    }
+  });
+
+  // luego agregamos SOLO la S3 key como string
   document.querySelectorAll('input[type="file"]').forEach((input) => {
     const key = input.dataset.s3key;
-    if (key) formData.append(`${input.name || "file"}`, key);
+    if (key) formData.append(input.name || "file", key);
   });
 
   formData.append("step", currentStep);
@@ -185,7 +193,7 @@ document.querySelectorAll('input[type="file"]').forEach((input) => {
     const file = e.target.files[0];
     if (!file) return;
 
-    // Use input.name for stable field mapping (matches backend keys)
+    // Usar input.name para mapear 1:1 con el backend
     const fieldName = input.name || "file";
 
     const ext = (file.name.split(".").pop() || "").toLowerCase();
@@ -235,9 +243,17 @@ document.getElementById("grantForm").addEventListener("submit", async (e) => {
   const form = e.target;
   const formData = new FormData(form);
 
+  // *** FIX: borrar blobs de los inputs file del FormData ***
+  document.querySelectorAll('input[type="file"]').forEach((input) => {
+    if (formData.has(input.name)) {
+      formData.delete(input.name);
+    }
+  });
+
+  // y enviar SOLO las S3 keys
   document.querySelectorAll('input[type="file"]').forEach((input) => {
     const key = input.dataset.s3key;
-    if (key) formData.append(`${input.name || "file"}`, key);
+    if (key) formData.append(input.name || "file", key);
   });
 
   const existingToken = localStorage.getItem("draftToken");
