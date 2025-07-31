@@ -137,6 +137,52 @@ function nextStep(n) {
 }
 showStep(currentStep);
 
+// Load draft when coming from email resume link (cookie-based)
+(async function loadDraftOnInit() {
+  try {
+    const who = await fetch(`${API_BASE}/resume/whoami`).then((r) => r.json());
+    const token = who?.token;
+    if (!token) return; // no cookie, nada que cargar
+
+    // Guardamos token localmente para futuras guardas
+    localStorage.setItem("draftToken", token);
+
+    const res = await fetch(
+      `${API_BASE}/resume/get-draft?token=${encodeURIComponent(token)}`
+    );
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data || typeof data !== "object") return;
+
+    // Poblar campos (text, checkbox, radio)
+    Object.entries(data).forEach(([name, value]) => {
+      const input = document.querySelector(`[name="${name}"]`);
+      if (!input) return;
+
+      if (input.type === "checkbox") {
+        input.checked = !!value;
+      } else if (input.type === "radio") {
+        const radio = document.querySelector(
+          `input[name="${name}"][value="${value}"]`
+        );
+        if (radio) radio.checked = true;
+      } else {
+        input.value = value ?? "";
+      }
+    });
+
+    // Si viene step, vamos a ese paso
+    if (typeof data.step === "number") {
+      currentStep = Math.min(Math.max(0, data.step), steps.length - 1);
+      showStep(currentStep);
+    }
+
+    showToast("Draft loaded.");
+  } catch (e) {
+    console.error("loadDraftOnInit error:", e);
+  }
+})();
+
 // Ensure draft token exists
 async function ensureToken() {
   let token = localStorage.getItem("draftToken");
