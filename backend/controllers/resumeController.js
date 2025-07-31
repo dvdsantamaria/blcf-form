@@ -33,8 +33,6 @@ function isEmail(s) {
   return typeof s === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
 }
 
-console.log("[sendResumeLink] email:", email, "token:", token);
-
 const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || "").replace(/\/$/, "");
 const BACKEND_BASE_URL = (process.env.BACKEND_BASE_URL || "").replace(
   /\/$/,
@@ -59,7 +57,8 @@ export async function sendResumeLink(req, res) {
     if (!token)
       return res.status(400).json({ ok: false, error: "Missing token" });
 
-    // Verificá que exista draft para ese token (opcional pero recomendado)
+    console.log("[sendResumeLink] email:", email, "token:", token);
+
     const draft = await FormDraft.findOne({ token }).lean();
     if (!draft) {
       return res
@@ -77,7 +76,7 @@ export async function sendResumeLink(req, res) {
     });
 
     const exchangeUrl =
-      BACKEND_BASE_URL || PUBLIC_BASE_URL || ""
+      BACKEND_BASE_URL || PUBLIC_BASE_URL
         ? `${
             BACKEND_BASE_URL || PUBLIC_BASE_URL
           }/api/resume/exchange?rt=${encodeURIComponent(rt)}`
@@ -97,6 +96,7 @@ export async function sendResumeLink(req, res) {
         },
       });
       await ses.send(cmd);
+      console.log("[sendResumeLink] SES email sent to:", email);
     } else {
       console.warn(
         "[sendResumeLink] SES_FROM not set. DEV fallback link:",
@@ -104,9 +104,6 @@ export async function sendResumeLink(req, res) {
       );
     }
 
-    console.log("[sendResumeLink] SES sent ok to:", email);
-
-    // Guarda email en draft
     await FormDraft.findOneAndUpdate(
       { token },
       { $set: { email, lastActivityAt: new Date() } },
@@ -121,11 +118,12 @@ export async function sendResumeLink(req, res) {
 }
 
 // GET /api/resume/exchange?rt=...
-// Clic desde el email -> set cookie HttpOnly con submissionId y redirige al front
 export async function exchangeResumeToken(req, res) {
   try {
     const { rt } = req.query || {};
     if (!rt) return res.status(400).send("Missing token");
+
+    console.log("[exchangeResumeToken] Received token:", rt);
 
     const doc = await ResumeToken.findOne({ resumeToken: rt }).lean();
     if (!doc) return res.status(404).send("Token not found");
@@ -134,13 +132,11 @@ export async function exchangeResumeToken(req, res) {
       return res.status(410).send("Token expired");
     }
 
-    // marcar como usado
     await ResumeToken.updateOne({ resumeToken: rt }, { $set: { used: true } });
 
-    // set cookie HttpOnly (contiene submissionId -> se usa para recuperar el draft sin exponerlo en URL)
     const cookieOpts = {
       httpOnly: true,
-      secure: true, // en prod con HTTPS
+      secure: true,
       sameSite: "lax",
       maxAge: 24 * 60 * 60 * 1000,
       path: "/",
@@ -148,6 +144,7 @@ export async function exchangeResumeToken(req, res) {
     res.cookie("resume", doc.submissionId, cookieOpts);
 
     const redirectTo = PUBLIC_BASE_URL ? `${PUBLIC_BASE_URL}/?resumed=1` : "/";
+    console.log("[exchangeResumeToken] Redirecting to:", redirectTo);
     return res.redirect(302, redirectTo);
   } catch (err) {
     console.error("exchangeResumeToken error:", err);
@@ -161,6 +158,8 @@ export async function getDraft(req, res) {
     const token = req.query?.token || req.cookies?.resume;
     if (!token)
       return res.status(400).json({ ok: false, error: "Missing token" });
+
+    console.log("[getDraft] Token:", token);
 
     const doc = await FormDraft.findOne({ token }).lean();
     if (!doc || !doc.s3Key) {
@@ -178,7 +177,6 @@ export async function getDraft(req, res) {
     const text = await streamToString(obj.Body);
     const json = JSON.parse(text);
 
-    // Devolvemos data plana para que el front mapée directo (y sumamos el step guardado)
     const payload = json?.data || json || {};
     if (typeof doc.step === "number") payload.step = doc.step;
 
@@ -189,19 +187,19 @@ export async function getDraft(req, res) {
   }
 }
 
-// GET /api/resume/whoami -> { ok, token } si hay cookie
+// GET /api/resume/whoami
 export async function whoAmI(req, res) {
   try {
     const token = req.cookies?.resume;
-    if (!token) return res.json({ ok: true, token: null });
-    return res.json({ ok: true, token });
+    console.log("[whoAmI] Resume cookie token:", token);
+    return res.json({ ok: true, token: token || null });
   } catch (err) {
     console.error("whoAmI error:", err);
     return res.status(500).json({ ok: false, error: "Internal Server Error" });
   }
 }
 
-// POST /api/resume/logout -> limpia cookie
+// POST /api/resume/logout
 export async function logout(req, res) {
   try {
     res.clearCookie("resume", { path: "/" });
