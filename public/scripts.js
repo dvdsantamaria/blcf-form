@@ -9,55 +9,55 @@ const submitBtn = document.getElementById("submitBtn");
 const saveBtn = document.getElementById("saveDraftBtn");
 const grantForm = document.getElementById("grantForm");
 
-// Disable inputs in reader mode and hide action buttons
-if (isReader) {
-  if (submitBtn) submitBtn.style.display = "none";
-  if (saveBtn) saveBtn.style.display = "none";
-  document.querySelectorAll("input, textarea, select").forEach((el) => {
-    el.disabled = true;
-  });
-}
+// ---------- Opcionales (únicos) ----------
+const OPTIONAL_FIELDS = new Set([
+  "ndis.notEligibleReason",
+  "ndis.moreSupportWhy",
+  // Todo Parent/Carer 2
+  "parent2.relationshipToChild",
+  "parent2.firstName",
+  "parent2.lastName",
+  "parent2.mobile",
+  "parent2.email",
+  "parent2.employmentStatus",
+  "parent2.occupation",
+  "parent2.centrelinkPayments",
+  "parent2.livingArrangements",
+  "parent2.relationshipToParent1",
+  // Adicionales
+  "dependents.ages",
+  "dependents.withDisabilityCount",
+  "otherConditions.details",
+]);
 
-// Human-readable labels
-const LABEL = {
-  "referral.source": "How did you hear about us",
-  // Step 1 – Parent/Carer 1
-  "parent1.firstName": "Parent/Carer 1 first name",
-  "parent1.lastName": "Parent/Carer 1 last name",
-  "parent1.email": "Parent/Carer 1 email",
-  "parent1.mobile": "Parent/Carer 1 mobile",
-  // Step 2 – Child
-  "child.firstName": "Child first name",
-  "child.lastName": "Child last name",
-  "child.dob": "Child date of birth",
-  // Step 3 – Therapy
-  "therapy.toBeFunded": "Therapy to be funded",
-  // Step 5 – Consents
-  "consent.terms": "Agree to privacy & terms",
-  "consent.truth": "Declaration is true",
-};
+// Checkboxes de consentimiento requeridos
+const CONSENT_REQUIRED_CHECKS = new Set([
+  "consent.terms",
+  "consent.truth",
+  "consent.report",
+  "consent.media",
+]);
 
-// Validation rules per step (indices 0..4; 5 = Thank you)
-const STEP_RULES = {
-  0: { required: ["parent1.firstName", "parent1.lastName", "parent1.email"] },
-  1: { required: ["child.firstName", "child.lastName", "child.dob"] },
-  2: { required: ["therapy.toBeFunded"] },
-  3: {},
-  4: { requiredChecks: ["consent.terms", "consent.truth"] },
-};
+// Archivos requeridos (no listados como opcionales)
+const REQUIRED_FILE_FIELDS = new Set([
+  "docs.ndisCommunication",
+  "docs.supportLetterHealthProfessional",
+  "docs.diagnosisLetter",
+  "docs.additionalLetterOptional", // OJO: pedido explícito de que SOLO 6 sean opcionales
+]);
 
-// Minimal fields required to allow saving a draft
+// Requisitos mínimos para guardar borrador:
 const DRAFT_MIN_REQUIRED = [
   "parent1.firstName",
   "parent1.mobile",
   "parent1.email",
 ];
 
+// ---------- Utilidades ----------
 function isEmail(v) {
   return !!v && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
 }
 
-// Toast helper
 function showToast(msg) {
   let t = document.getElementById("toast");
   if (!t) {
@@ -88,7 +88,6 @@ function showToast(msg) {
   t._h = setTimeout(() => (t.style.opacity = "0"), 3000);
 }
 
-// Mark/unmark invalid fields
 function clearAllInvalid() {
   document.querySelectorAll(".is-invalid").forEach((el) => {
     el.classList.remove("is-invalid");
@@ -109,90 +108,218 @@ function markInvalid(el) {
   el.addEventListener("change", remove, { once: true });
 }
 
-function fieldValueOk(name) {
-  const el = document.querySelector(`[name="${name}"]`);
-  if (!el) return true; // if the field isn't present, don't block
-  if (el.type === "checkbox") return el.checked;
-  const val = (el.value || "").trim();
-  if (name === "parent1.email") return isEmail(val);
-  return val.length > 0;
+// Añadir “(optional)” a labels de campos opcionales
+(function annotateOptionalLabels() {
+  OPTIONAL_FIELDS.forEach((name) => {
+    const el = document.querySelector(`[name="${name}"]`);
+    if (!el) return;
+
+    // Caso 1: hay label inmediatamente antes
+    let label =
+      el.previousElementSibling && el.previousElementSibling.tagName === "LABEL"
+        ? el.previousElementSibling
+        : null;
+
+    // Caso 2: hay label con atributo for (menos frecuente en este HTML)
+    if (!label && el.id) {
+      const byFor = document.querySelector(`label[for="${el.id}"]`);
+      if (byFor) label = byFor;
+    }
+
+    // Si no hay label, insertamos un pequeño texto al lado
+    if (label) {
+      if (!/optional\)/i.test(label.textContent)) {
+        label.innerHTML = `${label.innerHTML} <span class="text-muted">(optional)</span>`;
+      }
+    } else {
+      const small = document.createElement("small");
+      small.className = "text-muted ms-1";
+      small.textContent = "(optional)";
+      el.insertAdjacentElement("afterend", small);
+    }
+  });
+})();
+
+// Desactivar edición en modo reader
+if (isReader) {
+  if (submitBtn) submitBtn.style.display = "none";
+  if (saveBtn) saveBtn.style.display = "none";
+  document.querySelectorAll("input, textarea, select").forEach((el) => {
+    el.disabled = true;
+  });
 }
 
-// Validate current step only (for "Next")
-function validateStep(idx) {
-  const rules = STEP_RULES[idx] || {};
-  const container = steps[idx];
-  clearInvalid(container);
+// ---------- Cálculo automático de Age ----------
+function calcAgeYears(dobStr) {
+  const d = dobStr ? new Date(dobStr) : null;
+  if (!d || Number.isNaN(d.getTime())) return "";
+  const today = new Date();
+  let years = today.getFullYear() - d.getFullYear();
+  const m = today.getMonth() - d.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < d.getDate())) years--;
+  return years >= 0 ? String(years) : "";
+}
 
-  const missing = [];
-  let firstInvalid = null;
+(function wireAgeAutofill() {
+  const dobEl = document.querySelector('[name="child.dob"]');
+  const ageEl = document.querySelector('[name="child.age"]');
+  if (!dobEl || !ageEl) return;
 
-  (rules.required || []).forEach((name) => {
-    const el = container.querySelector(`[name="${name}"]`);
-    if (!el) return;
-    const ok =
-      name === "parent1.email"
-        ? isEmail((el.value || "").trim())
-        : (el.value || "").trim().length > 0;
-    if (!ok) {
-      missing.push(LABEL[name] || name);
-      markInvalid(el);
-      firstInvalid ||= el;
+  function updateAge() {
+    const years = calcAgeYears(dobEl.value);
+    if (years !== "") {
+      ageEl.placeholder = years;
+      // Completar valor para cumplir requisito
+      ageEl.value = years;
+    } else {
+      ageEl.placeholder = "";
+      // no sobreescribimos valor si el usuario puso algo
+      if (!ageEl.value) ageEl.value = "";
     }
-  });
-
-  (rules.requiredChecks || []).forEach((name) => {
-    const el = container.querySelector(`[name="${name}"]`);
-    if (el && !el.checked) {
-      missing.push(LABEL[name] || name);
-      markInvalid(el);
-      firstInvalid ||= el;
-    }
-  });
-
-  if (missing.length) {
-    showToast(`Please complete: ${missing.join(", ")}.`);
-    firstInvalid?.scrollIntoView({ behavior: "smooth", block: "center" });
-    firstInvalid?.focus();
-    return false;
   }
+
+  dobEl.addEventListener("change", updateAge);
+  dobEl.addEventListener("input", updateAge);
+
+  // Inicial si ya hay DOB seteado
+  updateAge();
+})();
+
+// ---------- Validación dinámica ----------
+function isRequiredField(elName) {
+  if (!elName) return false;
+  // Excluir opcionales
+  if (OPTIONAL_FIELDS.has(elName)) return false;
+
+  // Checkboxes no-consent no se exigen
+  const checkbox = document.querySelector(`[name="${elName}"]`);
+  if (checkbox && checkbox.type === "checkbox") {
+    return CONSENT_REQUIRED_CHECKS.has(elName);
+  }
+
+  // Archivos: sólo los listados en REQUIRED_FILE_FIELDS
+  if (REQUIRED_FILE_FIELDS.has(elName)) return true;
+
+  // Por defecto, requerido
   return true;
 }
 
-// Validate ALL required fields across the form (for final Submit)
+function validateContainer(container) {
+  clearInvalid(container);
+  const missing = [];
+  let firstInvalid = null;
+
+  const fields = container.querySelectorAll("input, select, textarea");
+  fields.forEach((el) => {
+    if (el.disabled) return;
+    const name = el.name;
+    if (!name) return;
+
+    // Botones fuera
+    if (el.type === "button" || el.type === "submit") return;
+
+    const required = isRequiredField(name);
+    if (!required) return;
+
+    // Validación según tipo
+    if (el.type === "checkbox") {
+      // Sólo consents
+      if (!el.checked) {
+        missing.push(readableName(name));
+        markInvalid(el);
+        firstInvalid ||= el;
+      }
+      return;
+    }
+
+    if (el.type === "file") {
+      // Validamos por dataset.s3key
+      if (!el.dataset.s3key) {
+        missing.push(readableName(name));
+        markInvalid(el);
+        firstInvalid ||= el;
+      }
+      return;
+    }
+
+    let val = (el.value || "").trim();
+
+    if (name === "parent1.email") {
+      if (!isEmail(val)) {
+        missing.push("Parent/Carer 1 email");
+        markInvalid(el);
+        firstInvalid ||= el;
+      }
+      return;
+    }
+
+    if (!val) {
+      missing.push(readableName(name));
+      markInvalid(el);
+      firstInvalid ||= el;
+    }
+  });
+
+  return { ok: missing.length === 0, missing, firstInvalid };
+}
+
+function readableName(name) {
+  // Etiquetas mínimas amigables; para el resto usamos el name
+  const map = {
+    "referral.source": "How did you hear about us",
+    "parent1.firstName": "Parent/Carer 1 first name",
+    "parent1.lastName": "Parent/Carer 1 last name",
+    "parent1.mobile": "Parent/Carer 1 mobile",
+    "parent1.email": "Parent/Carer 1 email",
+    "child.firstName": "Child first name",
+    "child.lastName": "Child last name",
+    "child.dob": "Date of birth",
+    "child.age": "Age",
+    "child.gender": "Gender",
+    "child.phone": "Child phone",
+    "child.streetNumber": "Street and number",
+    "child.suburb": "Suburb",
+    "child.state": "State",
+    "child.postcode": "Postcode",
+    "ndis.participantEligible": "NDIS participant or eligible",
+    "docs.ndisCommunication": "NDIS communication",
+    "docs.supportLetterHealthProfessional":
+      "Support letter (health professional)",
+    "therapy.toBeFunded": "Therapy to be funded",
+    "therapy.frequencyOrEquipment": "Therapy frequency / equipment",
+    "therapy.goals": "Therapy goals",
+    "therapy.noGrantImpact": "Impact if grant not received",
+    "docs.diagnosisLetter": "Diagnosis letter",
+    "docs.additionalLetterOptional": "Additional letter",
+    "household.sameHousehold":
+      "Do both parents/carers live in the same household?",
+    "dependents.countUnder18": "Number of dependents under 18",
+    "consent.terms": "Agree to privacy & terms",
+    "consent.truth": "Declaration is true",
+    "consent.report": "Agree to complete the final survey/report",
+    "consent.media": "Permission for image use",
+  };
+  return map[name] || name;
+}
+
+// Validación por paso (para “Next”)
+function validateStep(idx) {
+  const container = steps[idx];
+  const { ok, missing, firstInvalid } = validateContainer(container);
+  if (!ok) {
+    showToast(`Please complete: ${missing.join(", ")}.`);
+    firstInvalid?.scrollIntoView({ behavior: "smooth", block: "center" });
+    firstInvalid?.focus();
+  }
+  return ok;
+}
+
+// Validación global para Submit
 function validateAll() {
   clearAllInvalid();
-  for (let i = 0; i <= 4; i++) {
-    const rules = STEP_RULES[i] || {};
-    const container = steps[i];
-    const missing = [];
-    let firstInvalid = null;
-
-    (rules.required || []).forEach((name) => {
-      const el = document.querySelector(`[name="${name}"]`);
-      if (!el) return;
-      const ok =
-        name === "parent1.email"
-          ? isEmail((el.value || "").trim())
-          : (el.value || "").trim().length > 0;
-      if (!ok) {
-        missing.push(LABEL[name] || name);
-        markInvalid(el);
-        firstInvalid ||= el;
-      }
-    });
-
-    (rules.requiredChecks || []).forEach((name) => {
-      const el = document.querySelector(`[name="${name}"]`);
-      if (el && !el.checked) {
-        missing.push(LABEL[name] || name);
-        markInvalid(el);
-        firstInvalid ||= el;
-      }
-    });
-
-    if (missing.length) {
-      // Jump to the step that has missing fields
+  for (let i = 0; i < steps.length - 1; i++) {
+    const { ok, missing, firstInvalid } = validateContainer(steps[i]);
+    if (!ok) {
       currentStep = i;
       showStep(currentStep);
       showToast(`Please complete: ${missing.join(", ")}.`);
@@ -204,7 +331,7 @@ function validateAll() {
   return true;
 }
 
-// Step navigation
+// ---------- Navegación de pasos ----------
 function showStep(n) {
   steps.forEach((s, i) => s.classList.toggle("active", i === n));
   const prevBtn = document.querySelector('button[onclick="nextStep(-1)"]');
@@ -216,17 +343,16 @@ function showStep(n) {
   if (nextBtn)
     nextBtn.style.display = n >= steps.length - 2 ? "none" : "inline-block";
 
-  // Show Submit only on the penultimate step (consents)
+  // Submit sólo en la pantalla de consentimientos (penúltima)
   if (submitBtn)
     submitBtn.style.display =
       n === steps.length - 2 && !isReader ? "inline-block" : "none";
 
-  // Show Save on all steps EXCEPT the submit step and the final thank-you
+  // Save en todas menos la de consents y la final
   if (saveBtn)
     saveBtn.style.display =
       n < steps.length - 2 && !isReader ? "inline-block" : "none";
 }
-
 function nextStep(n) {
   if (!isReader && n === 1 && !validateStep(currentStep)) return;
   currentStep += n;
@@ -234,7 +360,7 @@ function nextStep(n) {
 }
 showStep(currentStep);
 
-// Prevent submit in reader mode
+// Evitar submit en reader
 if (grantForm) {
   grantForm.addEventListener("submit", (e) => {
     if (isReader) {
@@ -244,7 +370,7 @@ if (grantForm) {
   });
 }
 
-// Single load for READER MODE (no duplicate calls)
+// ---------- Carga modo reader (una sola vez) ----------
 (async function loadForReader() {
   try {
     if (!isReader) return;
@@ -274,6 +400,17 @@ if (grantForm) {
       }
     });
 
+    // Recalcular Age por si viene DOB
+    const dobEl = document.querySelector('[name="child.dob"]');
+    const ageEl = document.querySelector('[name="child.age"]');
+    if (dobEl && ageEl) {
+      const years = calcAgeYears(dobEl.value);
+      if (years !== "") {
+        ageEl.placeholder = years;
+        ageEl.value = years;
+      }
+    }
+
     if (typeof payload.step === "number") {
       currentStep = Math.min(Math.max(0, payload.step), steps.length - 1);
       showStep(currentStep);
@@ -287,9 +424,9 @@ if (grantForm) {
   }
 })();
 
-// --------------- Editing mode only ---------------
+// ---------- Modo edición ----------
 if (!isReader) {
-  // Ensure draft token exists on first save
+  // Asegurar token en primer guardado
   async function ensureToken() {
     let token = localStorage.getItem("draftToken");
     if (token) return token;
@@ -306,7 +443,7 @@ if (!isReader) {
     return token;
   }
 
-  // Minimal validation for draft save
+  // Validación mínima de borrador
   function validateDraftMin() {
     const missing = [];
     let firstInvalid = null;
@@ -317,7 +454,7 @@ if (!isReader) {
       let ok = (el.value || "").trim().length > 0;
       if (name === "parent1.email") ok = isEmail((el.value || "").trim());
       if (!ok) {
-        missing.push(LABEL[name] || name);
+        missing.push(readableName(name));
         markInvalid(el);
         firstInvalid ||= el;
       }
@@ -332,7 +469,7 @@ if (!isReader) {
     return true;
   }
 
-  // File upload wiring
+  // Subida de archivos (pre-signed S3)
   document.querySelectorAll("input[type='file']").forEach((input) => {
     input.addEventListener("change", async () => {
       const file = input.files[0];
@@ -376,22 +513,20 @@ if (!isReader) {
     });
   });
 
-  // Expose saveStep globally (button onclick)
+  // Guardar borrador
   window.saveStep = async function saveStep() {
     clearAllInvalid();
     if (!validateDraftMin()) return;
 
-    const form = document.getElementById("grantForm");
-    const formData = new FormData(form);
+    const formData = new FormData(grantForm);
 
-    // Strip file blobs, send only S3 keys
+    // Enviar sólo claves S3
     document.querySelectorAll("input[type='file']").forEach((input) => {
       if (formData.has(input.name)) formData.delete(input.name);
       if (input.dataset.s3key) formData.append(input.name, input.dataset.s3key);
     });
 
     formData.append("step", currentStep);
-
     const existingToken = localStorage.getItem("draftToken");
     if (existingToken) formData.append("token", existingToken);
 
@@ -403,12 +538,10 @@ if (!isReader) {
       if (!resp.ok) throw new Error(`save-draft ${resp.status}`);
       const json = await resp.json();
 
-      // Persist token
-      const tokenFromResp =
-        json.token || localStorage.getItem("draftToken") || existingToken || "";
+      const tokenFromResp = json.token || existingToken || "";
       if (json.token) localStorage.setItem("draftToken", json.token);
 
-      // Send resume link once per token (if we have email)
+      // Enviar link de reanudación una sola vez por token si hay email
       const emailEl = document.querySelector('[name="parent1.email"]');
       const email = emailEl?.value?.trim();
       const token = tokenFromResp;
@@ -439,17 +572,15 @@ if (!isReader) {
     }
   };
 
-  // Final submit
+  // Submit final
   if (grantForm) {
     grantForm.addEventListener("submit", async (e) => {
       e.preventDefault();
-
-      // Validate the whole form (all required rules)
       if (!validateAll()) return;
 
       const formData = new FormData(grantForm);
 
-      // Strip blobs, append only S3 keys
+      // Adjuntar sólo claves S3
       document.querySelectorAll("input[type='file']").forEach((input) => {
         if (formData.has(input.name)) formData.delete(input.name);
         if (input.dataset.s3key)
@@ -483,11 +614,11 @@ if (!isReader) {
     });
   }
 } else {
-  // No-op to avoid errors if someone triggers saveStep in reader
+  // No-op si alguien dispara saveStep en modo reader
   window.saveStep = function () {};
 }
 
-// Dev helper to clear session
+// Helper dev
 window.devClearResumeSession = async function () {
   try {
     await fetch(`${API_BASE}/resume/logout`, { method: "POST" });
