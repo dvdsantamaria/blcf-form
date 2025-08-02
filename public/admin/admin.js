@@ -30,20 +30,27 @@ async function loadList() {
     tbody.innerHTML = "";
     (data.items || []).forEach((row) => {
       const tr = document.createElement("tr");
-      tr.innerHTML = `
-        <td>${row.submissionId}</td>
-        <td>${row.status || ""}</td>
-        <td>${
-          row.createdAt ? new Date(row.createdAt).toLocaleString() : ""
-        }</td>
-        <td>${
-          row.lastActivityAt
-            ? new Date(row.lastActivityAt).toLocaleString()
-            : ""
-        }</td>
-        <td>${row.email || ""}</td>
-        <td><button data-token="${row.submissionId}">Ver</button></td>
-      `;
+      <td>
+        <button data-token="${row.submissionId}" class="btn-open">
+          Open
+        </button>
+        <button data-token="${row.submissionId}" class="btn-manifest">
+          Manifest
+        </button>
+      </td>;
+
+      tbody.querySelectorAll("button.btn-open").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const FRONT_BASE = window.FRONT_BASE || location.origin;
+          const url = `${FRONT_BASE}/?mode=reader&token=${encodeURIComponent(
+            btn.dataset.token
+          )}`;
+          window.open(url, "_blank", "noopener");
+        });
+      });
+      tbody.querySelectorAll("button.btn-manifest").forEach((btn) => {
+        btn.addEventListener("click", () => showDetail(btn.dataset.token));
+      });
       tbody.appendChild(tr);
     });
     tbody.querySelectorAll("button[data-token]").forEach((btn) => {

@@ -10,9 +10,8 @@ const saveBtn = document.getElementById("saveDraftBtn");
 if (isReader) {
   if (submitBtn) submitBtn.style.display = "none";
   if (saveBtn) saveBtn.style.display = "none";
-  // Deshabilitar campos editables, NO los botones
+  // Deshabilitar campos editables, NO los botones de navegación
   document.querySelectorAll("input, textarea, select").forEach((el) => {
-    // permitimos que radio/checkbox muestren el estado, pero igual los deshabilitamos para evitar edición
     el.disabled = true;
   });
 }
@@ -148,7 +147,7 @@ function showStep(n) {
 }
 
 function nextStep(n) {
-  // 👉 En reader NO validamos, pero permitimos navegar
+  // En reader NO validamos, pero permitimos navegar
   if (!isReader && n === 1 && !validateStep(currentStep)) return;
   currentStep += n;
   if (currentStep >= 0 && currentStep < steps.length) showStep(currentStep);
@@ -166,6 +165,9 @@ if (grantForm) {
   });
 }
 
+/* ─────────────────────────────
+   READER: cargar datos desde /api/form/view (única fuente)
+   ───────────────────────────── */
 (async function loadForReader() {
   try {
     if (!isReader) return;
@@ -177,8 +179,9 @@ if (grantForm) {
       `${API_BASE}/form/view?token=${encodeURIComponent(token)}`
     );
     if (!res.ok) return;
-    const payload = await res.json();
-    const data = payload?.data || {}; // la API devuelve { ok, type, data, ... }
+
+    const payload = await res.json(); // { ok, type, data, step? }
+    const data = payload?.data || {};
 
     // Populate inputs
     Object.entries(data).forEach(([name, value]) => {
@@ -196,7 +199,7 @@ if (grantForm) {
       }
     });
 
-    // Intentar llevar al step guardado si viene en draft (cuando type==='draft')
+    // Si vino step (cuando es draft), navega a ese paso
     if (typeof payload.step === "number") {
       currentStep = Math.min(Math.max(0, payload.step), steps.length - 1);
       showStep(currentStep);
@@ -210,47 +213,9 @@ if (grantForm) {
   }
 })();
 
-// LOAD DRAFT or SUBMISSION for reader mode
-(async function loadDraftOnInit() {
-  try {
-    if (!isReader) return;
-    const qs = new URLSearchParams(location.search);
-    const token = qs.get("token");
-    if (!token) return;
-    localStorage.setItem("draftToken", token);
-    const res = await fetch(
-      `${API_BASE}/resume/get-draft?token=${encodeURIComponent(token)}`
-    );
-    if (!res.ok) return;
-    const data = await res.json();
-    // Populate fields
-    Object.entries(data)
-      .filter(([k]) => k !== "step")
-      .forEach(([name, value]) => {
-        const input = document.querySelector(`[name="${name}"]`);
-        if (!input) return;
-        if (input.type === "checkbox") {
-          input.checked = !!value;
-        } else if (input.type === "radio") {
-          const radio = document.querySelector(
-            `input[name="${name}"][value="${value}"]`
-          );
-          if (radio) radio.checked = true;
-        } else {
-          input.value = value ?? "";
-        }
-      });
-    if (typeof data.step === "number") {
-      currentStep = Math.min(Math.max(0, data.step), steps.length - 1);
-      showStep(currentStep);
-    }
-    showToast("Viewing submission.");
-  } catch (e) {
-    console.error("loadDraftOnInit error:", e);
-  }
-})();
-
-// Only register upload & save logic if not reader
+/* ─────────────────────────────
+   MODO EDICIÓN (no reader): uploads, guardado y submit
+   ───────────────────────────── */
 if (!isReader) {
   // Ensure draft token exists on first save
   async function ensureToken() {
