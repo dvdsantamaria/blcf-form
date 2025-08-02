@@ -60,6 +60,13 @@ body {
   z-index: 4;
 }
 
+.step {
+  display: none;
+}
+.step.active {
+  display: block;
+}
+
 /* 7. Mobile: logo y título centrados, form más abajo */
 @media (max-width: 768px) {
   .logo {
