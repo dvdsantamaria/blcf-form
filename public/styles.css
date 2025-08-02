@@ -1,35 +1,21 @@
+/* 1. Eliminar padding global para que el cover arranque al ras */
 body {
   background: #f8f8f8;
-  padding: 2rem;
-}
-.form-wrapper {
-  max-width: 960px;
-  margin: auto;
-  background: #fff;
-  padding: 2rem;
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-}
-.step {
-  display: none;
-}
-.step.active {
-  display: block;
-}
-.buttons {
-  text-align: right;
-  margin-top: 2rem;
+  margin: 0; /* nuevo */
+  padding: 0; /* cambiado */
 }
 
-/* Hero section with background image */
+/* 2. Asegurar que el hero esté detrás del form */
 .hero {
   position: relative;
   height: 35vh;
-  background-image: url("cover.jpg"); /* replace with your image path */
+  background-image: url("cover.jpg");
   background-size: cover;
   background-position: center;
+  z-index: 1; /* nuevo */
 }
-/* gradient fade to transparent */
+
+/* 3. Gradient overlay (sin cambio) */
 .hero::after {
   content: "";
   position: absolute;
@@ -40,27 +26,41 @@ body {
     rgba(248, 248, 248, 1) 100%
   );
   pointer-events: none;
+  z-index: 2; /* para que esté sobre la imagen pero detrás del form */
 }
-/* logo (top left) */
+
+/* 4. Form-wrapper sobre la imagen */
+.form-wrapper {
+  position: relative;
+  z-index: 3; /* agregado */
+  max-width: 960px;
+  margin: -10vh auto 2rem auto; /* ajustado para que suba sobre la imagen */
+  background: #fff;
+  padding: 2rem;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+/* 5. Logo más grande */
 .logo {
   position: absolute;
   top: 1rem;
   left: 1rem;
-  height: 40px;
+  height: 52px; /* antes era 40px */
+  z-index: 4;
 }
-/* title (top right) */
+
+/* 6. Título fijo */
 .hero-title {
   position: absolute;
   top: 1rem;
   right: 1rem;
   margin: 0;
   font-size: 1.75rem;
+  z-index: 4;
 }
-/* pull form up over hero */
-.form-wrapper {
-  margin-top: -10vh;
-}
-/* mobile layout */
+
+/* 7. Mobile: logo y título centrados, form más abajo */
 @media (max-width: 768px) {
   .logo {
     position: static;
