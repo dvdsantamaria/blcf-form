@@ -18,13 +18,100 @@
       <h1>Grant Application form – BLCF</h1>
       <br />
       <form id="grantForm">
+        <!-- ===================== STEP 1 ===================== -->
         <div class="step active" id="step1">
+          <!-- How did you hear about us? (dropdown) -->
           <div class="mb-3">
             <label class="form-label">How did you hear about us?</label>
-            <input class="form-control" type="text" name="referral.source" />
+            <select class="form-select" name="referral.source">
+              <option value="">Select</option>
+              <option value="google">Google search</option>
+              <option value="social">
+                Social media (Facebook / Instagram)
+              </option>
+              <option value="school">School</option>
+              <option value="health-professional">Health professional</option>
+              <option value="friend-family">Friend / Family</option>
+              <option value="community-org">Community organisation</option>
+              <option value="website">Our website</option>
+              <option value="other">Other</option>
+            </select>
           </div>
-          <br />
-          <h2>Step 1: Child's Details</h2>
+
+          <h2>Step 1: Parent/Carer 1</h2>
+
+          <label class="form-label">Relationship to the child</label>
+          <input
+            class="form-control"
+            type="text"
+            name="parent1.relationshipToChild"
+          />
+
+          <div class="form-check mt-2">
+            <input
+              class="form-check-input"
+              id="financial1"
+              type="checkbox"
+              name="parent1.financialResponsible"
+            />
+            <label class="form-check-label" for="financial1"
+              >Financially responsible for the child</label
+            >
+          </div>
+
+          <input
+            class="form-control mt-2"
+            placeholder="First Name"
+            type="text"
+            name="parent1.firstName"
+          />
+          <input
+            class="form-control mt-2"
+            placeholder="Last Name"
+            type="text"
+            name="parent1.lastName"
+          />
+          <input
+            class="form-control mt-2"
+            placeholder="Mobile Number"
+            type="tel"
+            name="parent1.mobile"
+          />
+          <input
+            class="form-control mt-2"
+            placeholder="Email Address"
+            type="email"
+            name="parent1.email"
+          />
+          <input
+            class="form-control mt-2"
+            placeholder="Employment Status"
+            type="text"
+            name="parent1.employmentStatus"
+          />
+          <input
+            class="form-control mt-2"
+            placeholder="Occupation"
+            type="text"
+            name="parent1.occupation"
+          />
+          <input
+            class="form-control mt-2"
+            placeholder="Receiving Centrelink payments?"
+            type="text"
+            name="parent1.centrelinkPayments"
+          />
+          <input
+            class="form-control mt-2"
+            placeholder="Current living arrangements"
+            type="text"
+            name="parent1.livingArrangements"
+          />
+        </div>
+
+        <!-- ===================== STEP 2 ===================== -->
+        <div class="step" id="step2">
+          <h2>Step 2: Child's Details</h2>
 
           <div class="row g-3">
             <div class="col-md-6">
@@ -151,8 +238,9 @@
           ></textarea>
         </div>
 
-        <div class="step" id="step2">
-          <h2>Step 2: NDIS and Therapy</h2>
+        <!-- ===================== STEP 3 ===================== -->
+        <div class="step" id="step3">
+          <h2>Step 3: NDIS and Therapy</h2>
 
           <label class="form-label"
             >Is your child an NDIS participant or eligible?</label
@@ -246,8 +334,9 @@
           />
         </div>
 
-        <div class="step" id="step3">
-          <h2>Step 3: Parent/Carer Information</h2>
+        <!-- ===================== STEP 4 ===================== -->
+        <div class="step" id="step4">
+          <h2>Step 4: Household & Additional Details</h2>
 
           <label class="form-label"
             >Do both parents/carers live in the same household?</label
@@ -257,76 +346,6 @@
             <option>Yes</option>
             <option>No</option>
           </select>
-
-          <h3 class="mt-4">Parent/Carer 1</h3>
-
-          <label class="form-label">Relationship to the child</label>
-          <input
-            class="form-control"
-            type="text"
-            name="parent1.relationshipToChild"
-          />
-
-          <div class="form-check">
-            <input
-              class="form-check-input"
-              id="financial1"
-              type="checkbox"
-              name="parent1.financialResponsible"
-            />
-            <label class="form-check-label" for="financial1"
-              >Financially responsible for the child</label
-            >
-          </div>
-
-          <input
-            class="form-control mt-2"
-            placeholder="First Name"
-            type="text"
-            name="parent1.firstName"
-          />
-          <input
-            class="form-control mt-2"
-            placeholder="Last Name"
-            type="text"
-            name="parent1.lastName"
-          />
-          <input
-            class="form-control mt-2"
-            placeholder="Mobile Number"
-            type="tel"
-            name="parent1.mobile"
-          />
-          <input
-            class="form-control mt-2"
-            placeholder="Email Address"
-            type="email"
-            name="parent1.email"
-          />
-          <input
-            class="form-control mt-2"
-            placeholder="Employment Status"
-            type="text"
-            name="parent1.employmentStatus"
-          />
-          <input
-            class="form-control mt-2"
-            placeholder="Occupation"
-            type="text"
-            name="parent1.occupation"
-          />
-          <input
-            class="form-control mt-2"
-            placeholder="Receiving Centrelink payments?"
-            type="text"
-            name="parent1.centrelinkPayments"
-          />
-          <input
-            class="form-control mt-2"
-            placeholder="Current living arrangements"
-            type="text"
-            name="parent1.livingArrangements"
-          />
 
           <h3 class="mt-4">Parent/Carer 2 (optional)</h3>
 
@@ -390,10 +409,8 @@
             type="text"
             name="parent2.relationshipToParent1"
           />
-        </div>
 
-        <div class="step" id="step4">
-          <h2>Step 4: Additional Details and Consent</h2>
+          <h3 class="mt-4">Additional Details</h3>
 
           <input
             class="form-control mb-2"
@@ -419,6 +436,11 @@
             rows="2"
             name="otherConditions.details"
           ></textarea>
+        </div>
+
+        <!-- ===================== STEP 5 ===================== -->
+        <div class="step" id="step5">
+          <h2>Step 5: Consent</h2>
 
           <div class="form-check">
             <input
@@ -477,7 +499,8 @@
           </div>
         </div>
 
-        <div class="step" id="step5">
+        <!-- ===================== STEP 6 (Thank you) ===================== -->
+        <div class="step" id="step6">
           <h2>Thank you for your submission!</h2>
           <p>Your application has been received. We'll be in touch soon.</p>
           <p>
@@ -486,6 +509,7 @@
           </p>
         </div>
 
+        <!-- Buttons -->
         <div class="buttons d-flex justify-content-between">
           <button
             class="btn btn-outline-secondary"
