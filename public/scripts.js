@@ -2,41 +2,56 @@
 
 const API_BASE = "/api";
 const isReader = new URLSearchParams(location.search).get("mode") === "reader";
+
 let currentStep = 0;
 const steps = document.querySelectorAll(".step");
 const submitBtn = document.getElementById("submitBtn");
 const saveBtn = document.getElementById("saveDraftBtn");
+const grantForm = document.getElementById("grantForm");
 
+// Disable inputs in reader mode and hide action buttons
 if (isReader) {
   if (submitBtn) submitBtn.style.display = "none";
   if (saveBtn) saveBtn.style.display = "none";
-  // Deshabilitar campos editables, NO los botones de navegación
   document.querySelectorAll("input, textarea, select").forEach((el) => {
     el.disabled = true;
   });
 }
 
-// Human-readable labels for validation errors
+// Human-readable labels
 const LABEL = {
-  "child.firstName": "Child first name",
-  "child.lastName": "Child last name",
-  "child.dob": "Date of birth",
-  "therapy.toBeFunded": "Therapy to be funded",
+  "referral.source": "How did you hear about us",
+  // Step 1 – Parent/Carer 1
   "parent1.firstName": "Parent/Carer 1 first name",
   "parent1.lastName": "Parent/Carer 1 last name",
   "parent1.email": "Parent/Carer 1 email",
+  "parent1.mobile": "Parent/Carer 1 mobile",
+  // Step 2 – Child
+  "child.firstName": "Child first name",
+  "child.lastName": "Child last name",
+  "child.dob": "Child date of birth",
+  // Step 3 – Therapy
+  "therapy.toBeFunded": "Therapy to be funded",
+  // Step 5 – Consents
   "consent.terms": "Agree to privacy & terms",
   "consent.truth": "Declaration is true",
 };
 
-// Per-step rules
+// Validation rules per step (indices 0..4; 5 = Thank you)
 const STEP_RULES = {
-  0: { required: ["child.firstName", "child.lastName", "child.dob"] },
-  1: { required: ["therapy.toBeFunded"] },
-  2: { required: ["parent1.firstName", "parent1.lastName", "parent1.email"] },
-  3: { requiredChecks: ["consent.terms", "consent.truth"] },
-  4: {},
+  0: { required: ["parent1.firstName", "parent1.lastName", "parent1.email"] },
+  1: { required: ["child.firstName", "child.lastName", "child.dob"] },
+  2: { required: ["therapy.toBeFunded"] },
+  3: {},
+  4: { requiredChecks: ["consent.terms", "consent.truth"] },
 };
+
+// Minimal fields required to allow saving a draft
+const DRAFT_MIN_REQUIRED = [
+  "parent1.firstName",
+  "parent1.mobile",
+  "parent1.email",
+];
 
 function isEmail(v) {
   return !!v && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
@@ -73,7 +88,13 @@ function showToast(msg) {
   t._h = setTimeout(() => (t.style.opacity = "0"), 3000);
 }
 
-// Validation helpers
+// Mark/unmark invalid fields
+function clearAllInvalid() {
+  document.querySelectorAll(".is-invalid").forEach((el) => {
+    el.classList.remove("is-invalid");
+    el.removeAttribute("aria-invalid");
+  });
+}
 function clearInvalid(container) {
   container.querySelectorAll(".is-invalid").forEach((el) => {
     el.classList.remove("is-invalid");
@@ -88,19 +109,31 @@ function markInvalid(el) {
   el.addEventListener("change", remove, { once: true });
 }
 
-// Validate step before advancing
+function fieldValueOk(name) {
+  const el = document.querySelector(`[name="${name}"]`);
+  if (!el) return true; // if the field isn't present, don't block
+  if (el.type === "checkbox") return el.checked;
+  const val = (el.value || "").trim();
+  if (name === "parent1.email") return isEmail(val);
+  return val.length > 0;
+}
+
+// Validate current step only (for "Next")
 function validateStep(idx) {
   const rules = STEP_RULES[idx] || {};
   const container = steps[idx];
   clearInvalid(container);
+
   const missing = [];
   let firstInvalid = null;
 
   (rules.required || []).forEach((name) => {
     const el = container.querySelector(`[name="${name}"]`);
     if (!el) return;
-    const val = el.value.trim();
-    const ok = name === "parent1.email" ? isEmail(val) : val.length > 0;
+    const ok =
+      name === "parent1.email"
+        ? isEmail((el.value || "").trim())
+        : (el.value || "").trim().length > 0;
     if (!ok) {
       missing.push(LABEL[name] || name);
       markInvalid(el);
@@ -126,36 +159,82 @@ function validateStep(idx) {
   return true;
 }
 
+// Validate ALL required fields across the form (for final Submit)
+function validateAll() {
+  clearAllInvalid();
+  for (let i = 0; i <= 4; i++) {
+    const rules = STEP_RULES[i] || {};
+    const container = steps[i];
+    const missing = [];
+    let firstInvalid = null;
+
+    (rules.required || []).forEach((name) => {
+      const el = document.querySelector(`[name="${name}"]`);
+      if (!el) return;
+      const ok =
+        name === "parent1.email"
+          ? isEmail((el.value || "").trim())
+          : (el.value || "").trim().length > 0;
+      if (!ok) {
+        missing.push(LABEL[name] || name);
+        markInvalid(el);
+        firstInvalid ||= el;
+      }
+    });
+
+    (rules.requiredChecks || []).forEach((name) => {
+      const el = document.querySelector(`[name="${name}"]`);
+      if (el && !el.checked) {
+        missing.push(LABEL[name] || name);
+        markInvalid(el);
+        firstInvalid ||= el;
+      }
+    });
+
+    if (missing.length) {
+      // Jump to the step that has missing fields
+      currentStep = i;
+      showStep(currentStep);
+      showToast(`Please complete: ${missing.join(", ")}.`);
+      firstInvalid?.scrollIntoView({ behavior: "smooth", block: "center" });
+      firstInvalid?.focus();
+      return false;
+    }
+  }
+  return true;
+}
+
+// Step navigation
 function showStep(n) {
   steps.forEach((s, i) => s.classList.toggle("active", i === n));
-  // prev/next se mantienen visibles para navegar en reader
   const prevBtn = document.querySelector('button[onclick="nextStep(-1)"]');
   const nextBtn = document.querySelector('button[onclick="nextStep(1)"]');
+
   if (prevBtn)
     prevBtn.style.display =
       n === 0 || n === steps.length - 1 ? "none" : "inline-block";
   if (nextBtn)
     nextBtn.style.display = n >= steps.length - 2 ? "none" : "inline-block";
 
-  // submit/save solo en modo edición
+  // Show Submit only on the penultimate step (consents)
   if (submitBtn)
     submitBtn.style.display =
       n === steps.length - 2 && !isReader ? "inline-block" : "none";
+
+  // Show Save on all steps EXCEPT the submit step and the final thank-you
   if (saveBtn)
     saveBtn.style.display =
-      n === steps.length - 1 && !isReader ? "inline-block" : "none";
+      n < steps.length - 2 && !isReader ? "inline-block" : "none";
 }
 
 function nextStep(n) {
-  // En reader NO validamos, pero permitimos navegar
   if (!isReader && n === 1 && !validateStep(currentStep)) return;
   currentStep += n;
   if (currentStep >= 0 && currentStep < steps.length) showStep(currentStep);
 }
 showStep(currentStep);
 
-// Bloquear submit real en reader por seguridad
-const grantForm = document.getElementById("grantForm");
+// Prevent submit in reader mode
 if (grantForm) {
   grantForm.addEventListener("submit", (e) => {
     if (isReader) {
@@ -165,9 +244,7 @@ if (grantForm) {
   });
 }
 
-/* ─────────────────────────────
-   READER: cargar datos desde /api/form/view (única fuente)
-   ───────────────────────────── */
+// Single load for READER MODE (no duplicate calls)
 (async function loadForReader() {
   try {
     if (!isReader) return;
@@ -179,11 +256,9 @@ if (grantForm) {
       `${API_BASE}/form/view?token=${encodeURIComponent(token)}`
     );
     if (!res.ok) return;
-
-    const payload = await res.json(); // { ok, type, data, step? }
+    const payload = await res.json();
     const data = payload?.data || {};
 
-    // Populate inputs
     Object.entries(data).forEach(([name, value]) => {
       const input = document.querySelector(`[name="${name}"]`);
       if (!input) return;
@@ -199,7 +274,6 @@ if (grantForm) {
       }
     });
 
-    // Si vino step (cuando es draft), navega a ese paso
     if (typeof payload.step === "number") {
       currentStep = Math.min(Math.max(0, payload.step), steps.length - 1);
       showStep(currentStep);
@@ -213,9 +287,7 @@ if (grantForm) {
   }
 })();
 
-/* ─────────────────────────────
-   MODO EDICIÓN (no reader): uploads, guardado y submit
-   ───────────────────────────── */
+// --------------- Editing mode only ---------------
 if (!isReader) {
   // Ensure draft token exists on first save
   async function ensureToken() {
@@ -232,6 +304,32 @@ if (!isReader) {
     token = j.token;
     localStorage.setItem("draftToken", token);
     return token;
+  }
+
+  // Minimal validation for draft save
+  function validateDraftMin() {
+    const missing = [];
+    let firstInvalid = null;
+
+    DRAFT_MIN_REQUIRED.forEach((name) => {
+      const el = document.querySelector(`[name="${name}"]`);
+      if (!el) return;
+      let ok = (el.value || "").trim().length > 0;
+      if (name === "parent1.email") ok = isEmail((el.value || "").trim());
+      if (!ok) {
+        missing.push(LABEL[name] || name);
+        markInvalid(el);
+        firstInvalid ||= el;
+      }
+    });
+
+    if (missing.length) {
+      showToast(`Please complete: ${missing.join(", ")} to save your draft.`);
+      firstInvalid?.scrollIntoView({ behavior: "smooth", block: "center" });
+      firstInvalid?.focus();
+      return false;
+    }
+    return true;
   }
 
   // File upload wiring
@@ -278,80 +376,115 @@ if (!isReader) {
     });
   });
 
-  // Save draft handler bound to save button
+  // Expose saveStep globally (button onclick)
   window.saveStep = async function saveStep() {
+    clearAllInvalid();
+    if (!validateDraftMin()) return;
+
     const form = document.getElementById("grantForm");
     const formData = new FormData(form);
+
+    // Strip file blobs, send only S3 keys
     document.querySelectorAll("input[type='file']").forEach((input) => {
       if (formData.has(input.name)) formData.delete(input.name);
       if (input.dataset.s3key) formData.append(input.name, input.dataset.s3key);
     });
+
     formData.append("step", currentStep);
+
     const existingToken = localStorage.getItem("draftToken");
     if (existingToken) formData.append("token", existingToken);
+
     try {
       const resp = await fetch(`${API_BASE}/save-draft`, {
         method: "POST",
         body: formData,
       });
+      if (!resp.ok) throw new Error(`save-draft ${resp.status}`);
       const json = await resp.json();
+
+      // Persist token
+      const tokenFromResp =
+        json.token || localStorage.getItem("draftToken") || existingToken || "";
       if (json.token) localStorage.setItem("draftToken", json.token);
+
+      // Send resume link once per token (if we have email)
       const emailEl = document.querySelector('[name="parent1.email"]');
-      const email = emailEl?.value.trim();
-      const token = json.token || existingToken;
-      if (email && token) {
-        const sentKey = `resumeSent:${token}`;
-        if (!localStorage.getItem(sentKey)) {
-          await fetch(`${API_BASE}/resume/send-link`, {
+      const email = emailEl?.value?.trim();
+      const token = tokenFromResp;
+      const sentKey = token ? `resumeSent:${token}` : null;
+
+      if (
+        email &&
+        isEmail(email) &&
+        token &&
+        (!sentKey || !localStorage.getItem(sentKey))
+      ) {
+        try {
+          const r = await fetch(`${API_BASE}/resume/send-link`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ token, email }),
           });
-          localStorage.setItem(sentKey, "1");
+          if (r.ok && sentKey) localStorage.setItem(sentKey, "1");
+        } catch (e) {
+          console.error("send-link error:", e);
         }
       }
+
       showToast("Draft saved.");
     } catch (err) {
       console.error(err);
       showToast("Error saving draft.");
     }
   };
-}
 
-// Final submit
-if (!isReader && grantForm) {
-  grantForm.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    if (!validateStep(currentStep)) return;
-    const formData = new FormData(grantForm);
-    document.querySelectorAll("input[type='file']").forEach((input) => {
-      if (formData.has(input.name)) formData.delete(input.name);
-      if (input.dataset.s3key) formData.append(input.name, input.dataset.s3key);
-    });
-    const existingToken = localStorage.getItem("draftToken");
-    if (existingToken) formData.append("token", existingToken);
-    try {
-      const res = await fetch(`${API_BASE}/submit-form`, {
-        method: "POST",
-        body: formData,
+  // Final submit
+  if (grantForm) {
+    grantForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+
+      // Validate the whole form (all required rules)
+      if (!validateAll()) return;
+
+      const formData = new FormData(grantForm);
+
+      // Strip blobs, append only S3 keys
+      document.querySelectorAll("input[type='file']").forEach((input) => {
+        if (formData.has(input.name)) formData.delete(input.name);
+        if (input.dataset.s3key)
+          formData.append(input.name, input.dataset.s3key);
       });
-      if (res.ok) {
-        localStorage.removeItem("draftToken");
-        Object.keys(localStorage)
-          .filter((k) => k.startsWith("resumeSent:"))
-          .forEach((k) => localStorage.removeItem(k));
-        currentStep = steps.length - 1;
-        showStep(currentStep);
-        showToast("Submission received.");
-      } else {
-        console.error("Submit failed:", await res.text());
+
+      const existingToken = localStorage.getItem("draftToken");
+      if (existingToken) formData.append("token", existingToken);
+
+      try {
+        const res = await fetch(`${API_BASE}/submit-form`, {
+          method: "POST",
+          body: formData,
+        });
+        if (res.ok) {
+          localStorage.removeItem("draftToken");
+          Object.keys(localStorage)
+            .filter((k) => k.startsWith("resumeSent:"))
+            .forEach((k) => localStorage.removeItem(k));
+          currentStep = steps.length - 1; // Thank you
+          showStep(currentStep);
+          showToast("Submission received.");
+        } else {
+          console.error("Submit failed:", await res.text());
+          showToast("Submission failed.");
+        }
+      } catch (err) {
+        console.error(err);
         showToast("Submission failed.");
       }
-    } catch (err) {
-      console.error(err);
-      showToast("Submission failed.");
-    }
-  });
+    });
+  }
+} else {
+  // No-op to avoid errors if someone triggers saveStep in reader
+  window.saveStep = function () {};
 }
 
 // Dev helper to clear session
