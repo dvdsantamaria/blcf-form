@@ -1,10 +1,10 @@
 // backend/utils/mailer.js
 import "dotenv/config";
-import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
+import { Resend } from "resend";
 
-const ses =
-  process.env.SES_FROM && process.env.AWS_REGION
-    ? new SESClient({ region: process.env.AWS_REGION })
+const resend =
+  process.env.RESEND_API_KEY && process.env.SES_FROM
+    ? new Resend(process.env.RESEND_API_KEY)
     : null;
 
 function isAbsolute(url) {
@@ -13,10 +13,8 @@ function isAbsolute(url) {
 
 function buildReaderLink(token) {
   const base = (process.env.PUBLIC_BASE_URL || "").replace(/\/$/, "");
-  // Por defecto usamos "/?mode=reader". Podés overridear con READER_PATH=/form/view o un absoluto.
   const readerPath = process.env.READER_PATH || "/?mode=reader";
 
-  // Si READER_PATH es absoluto, lo usamos como base y sólo agregamos el token
   if (isAbsolute(readerPath)) {
     const sep = readerPath.includes("?") ? "&" : "?";
     return `${readerPath}${sep}token=${encodeURIComponent(token)}`;
@@ -26,7 +24,6 @@ function buildReaderLink(token) {
   const path = pathHasQuery ? readerPath : `${readerPath}?`;
   const sep = path.endsWith("?") ? "" : "&";
 
-  // Evitar doble slash: `${base}${path}` cuando path empieza con "/"
   return base
     ? `${base}${path}${sep}token=${encodeURIComponent(token)}`
     : `${path}${sep}token=${encodeURIComponent(token)}`;
@@ -34,32 +31,24 @@ function buildReaderLink(token) {
 
 async function sendHtmlEmail({ to, subject, html, text, replyTo }) {
   try {
-    if (!ses || !process.env.SES_FROM || !to) {
-      console.warn("[SES] Skipped (missing SES client / SES_FROM / to).", {
-        to,
-      });
+    if (!resend || !to || !process.env.SES_FROM) {
+      console.warn("[Resend] Skipped (missing config)", { to });
       return { ok: false, skipped: true };
     }
 
-    const cmd = new SendEmailCommand({
-      Destination: { ToAddresses: [to] },
-      Source: process.env.SES_FROM, // usar identidad verificada
-      ...(replyTo ? { ReplyToAddresses: [replyTo] } : {}),
-      Message: {
-        Subject: { Data: subject /* , Charset: "UTF-8" */ },
-        Body: {
-          ...(html ? { Html: { Data: html /* , Charset: "UTF-8" */ } } : {}),
-          ...(text ? { Text: { Data: text /* , Charset: "UTF-8" */ } } : {}),
-        },
-      },
-      // ...(process.env.SES_CONFIG_SET ? { ConfigurationSetName: process.env.SES_CONFIG_SET } : {}),
+    const { data, error } = await resend.emails.send({
+      from: process.env.SES_FROM,
+      to,
+      subject,
+      html,
+      ...(replyTo ? { reply_to: replyTo } : {}),
     });
 
-    const out = await ses.send(cmd);
-    console.log("[SES] sent", { to, id: out?.MessageId });
-    return { ok: true, id: out?.MessageId };
+    if (error) throw new Error(error.message);
+    console.log("[Resend] sent", { to, id: data.id });
+    return { ok: true, id: data.id };
   } catch (e) {
-    console.error("[SES] error:", e?.message || e);
+    console.error("[Resend] error:", e?.message || e);
     return { ok: false, error: e?.message || String(e) };
   }
 }
@@ -99,6 +88,6 @@ Ref: ${token}
     subject,
     html,
     text,
-    replyTo: process.env.REPLY_TO || undefined, // opcional
+    replyTo: process.env.REPLY_TO || undefined,
   });
 }
