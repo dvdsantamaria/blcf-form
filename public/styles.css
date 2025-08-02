@@ -20,3 +20,60 @@ body {
   text-align: right;
   margin-top: 2rem;
 }
+
+/* Hero section with background image */
+.hero {
+  position: relative;
+  height: 35vh;
+  background-image: url("cover.jpg"); /* replace with your image path */
+  background-size: cover;
+  background-position: center;
+}
+/* gradient fade to transparent */
+.hero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(248, 248, 248, 1) 100%
+  );
+  pointer-events: none;
+}
+/* logo (top left) */
+.logo {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  height: 40px;
+}
+/* title (top right) */
+.hero-title {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  margin: 0;
+  font-size: 1.75rem;
+}
+/* pull form up over hero */
+.form-wrapper {
+  margin-top: -10vh;
+}
+/* mobile layout */
+@media (max-width: 768px) {
+  .logo {
+    position: static;
+    display: block;
+    margin: 0.5rem auto 0;
+  }
+  .hero-title {
+    position: static;
+    display: block;
+    text-align: center;
+    margin: 0.5rem auto;
+  }
+  .form-wrapper {
+    margin-top: 1rem;
+  }
+}
