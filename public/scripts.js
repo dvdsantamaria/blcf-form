@@ -11,6 +11,7 @@ const grantForm = document.getElementById("grantForm");
 
 // -------------------- OPCIONALES (los ÚNICOS 6) --------------------
 const OPTIONAL_FIELDS = new Set([
+  "parent1.financialResponsible",
   "ndis.notEligibleReason",
   "ndis.moreSupportWhy",
   // Todo Parent/Carer 2:
@@ -36,7 +37,6 @@ const STEP_REQUIRED = {
   0: [
     "referral.source",
     "parent1.relationshipToChild",
-    "parent1.financialResponsible", // checkbox: debe estar tildado
     "parent1.firstName",
     "parent1.lastName",
     "parent1.mobile",
@@ -53,14 +53,13 @@ const STEP_REQUIRED = {
     "child.dob",
     "child.age",
     "child.gender",
-    "child.phone",
+    // "child.phone",
     "child.streetNumber",
     "child.suburb",
     "child.state",
     "child.postcode",
-    // refugee / indigenous son checkboxes; si querés que no sean forzados, comentá las dos siguientes líneas:
-    "child.refugee",
-    "child.indigenous",
+    // "child.refugee",
+    // "child.indigenous",
     "child.mainLanguage",
     "child.diagnosis",
     "child.impactDailyLife",
@@ -80,7 +79,7 @@ const STEP_REQUIRED = {
     "therapy.goals",
     "therapy.noGrantImpact",
     "docs.diagnosisLetter", // archivo requerido
-    "docs.additionalLetterOptional", // -> OJO: tu consigna dijo "resto son obligatorios". Si querés que NO sea requerido, quitá esta línea.
+    // "docs.additionalLetterOptional",
   ],
   // Paso 3: Household & Additional Details (Parent/Carer 2 todo opcional)
   3: [
@@ -282,31 +281,63 @@ if (isReader) {
 }
 
 // -------------------- Age desde DOB --------------------
-function calcAgeYears(dobStr) {
-  const d = dobStr ? new Date(dobStr) : null;
-  if (!d || Number.isNaN(d.getTime())) return "";
+function parseYMD(s) {
+  // Evita problemas de timezone/parse en Safari/Firefox
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || "");
+  if (!m) return null;
+  const y = Number(m[1]),
+    mo = Number(m[2]) - 1,
+    d = Number(m[3]);
+  return new Date(y, mo, d);
+}
+
+function calcAgeYearsFromDate(d) {
+  if (!(d instanceof Date) || isNaN(d)) return "";
   const today = new Date();
   let years = today.getFullYear() - d.getFullYear();
   const m = today.getMonth() - d.getMonth();
   if (m < 0 || (m === 0 && today.getDate() < d.getDate())) years--;
   return years >= 0 ? String(years) : "";
 }
+
+function ensureAgeFromDob() {
+  const dobEl = document.querySelector('[name="child.dob"]');
+  const ageEl = document.querySelector('[name="child.age"]');
+  if (!dobEl || !ageEl) return;
+
+  const d = parseYMD(dobEl.value);
+  const years = calcAgeYearsFromDate(d);
+  if (years !== "") {
+    // set value SIEMPRE; no usar "||" para no borrar "0"
+    ageEl.value = years;
+    ageEl.placeholder = years;
+  } else {
+    ageEl.value = "";
+    ageEl.placeholder = "";
+  }
+}
+
+// Inicializa: hace readonly y bindea eventos seguros
 (function wireAgeAutofill() {
   const dobEl = document.querySelector('[name="child.dob"]');
   const ageEl = document.querySelector('[name="child.age"]');
   if (!dobEl || !ageEl) return;
-  function updateAge() {
-    const years = calcAgeYears(dobEl.value);
-    ageEl.placeholder = years || "";
-    ageEl.value = years || "";
-  }
-  dobEl.addEventListener("change", updateAge);
-  dobEl.addEventListener("input", updateAge);
-  updateAge();
+
+  // Evita edición manual: la calculamos siempre a partir del DOB
+  ageEl.readOnly = true;
+
+  // Dispara en cuanto el usuario cambia/termina de elegir la fecha
+  ["input", "change", "blur"].forEach((evt) =>
+    dobEl.addEventListener(evt, ensureAgeFromDob)
+  );
+
+  // Calcular al cargar (por si viene de draft/reader)
+  ensureAgeFromDob();
 })();
 
 // -------------------- Validación --------------------
 function validateStep(idx) {
+  ensureAgeFromDob();
   const required = STEP_REQUIRED[idx] || [];
   const container = steps[idx];
   clearInvalid(container);
