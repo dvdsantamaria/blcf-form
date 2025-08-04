@@ -11,10 +11,11 @@ const grantForm = document.getElementById("grantForm");
 
 // -------------------- OPCIONALES (los ÚNICOS 6) --------------------
 const OPTIONAL_FIELDS = new Set([
-  "parent1.financialResponsible",
+  // 1) If NO, why not?
   "ndis.notEligibleReason",
+  // 2) If YES but more support is needed, why?
   "ndis.moreSupportWhy",
-  // Todo Parent/Carer 2:
+  // 3) Parent/Carer 2 (completo):
   "parent2.relationshipToChild",
   "parent2.firstName",
   "parent2.lastName",
@@ -25,9 +26,11 @@ const OPTIONAL_FIELDS = new Set([
   "parent2.centrelinkPayments",
   "parent2.livingArrangements",
   "parent2.relationshipToParent1",
-  // Adicionales:
+  // 4) Ages of dependents
   "dependents.ages",
+  // 5) How many with disability?
   "dependents.withDisabilityCount",
+  // 6) Details of other conditions/disabilities
   "otherConditions.details",
 ]);
 
@@ -37,6 +40,7 @@ const STEP_REQUIRED = {
   0: [
     "referral.source",
     "parent1.relationshipToChild",
+    // "parent1.financialResponsible"  // <- es checkbox SI/NO, no puede ser "requerido" forzando a chequear; se captura como dato si aplica
     "parent1.firstName",
     "parent1.lastName",
     "parent1.mobile",
@@ -53,11 +57,12 @@ const STEP_REQUIRED = {
     "child.dob",
     "child.age",
     "child.gender",
-    // "child.phone",
+    "child.phone", // <- ahora requerido
     "child.streetNumber",
     "child.suburb",
     "child.state",
     "child.postcode",
+    // Los dos siguientes son checkboxes “informativos”, no tiene sentido forzar a “true”:
     // "child.refugee",
     // "child.indigenous",
     "child.mainLanguage",
@@ -85,10 +90,7 @@ const STEP_REQUIRED = {
   3: [
     "household.sameHousehold",
     "dependents.countUnder18",
-    // opcionales:
-    // "dependents.ages",
-    // "dependents.withDisabilityCount",
-    // "otherConditions.details",
+    // opcionales: ages / withDisabilityCount / otherConditions.details
   ],
   // Paso 4: Consent (mailUpdates es opcional)
   4: ["consent.terms", "consent.truth", "consent.report", "consent.media"],
@@ -159,6 +161,7 @@ function markInvalid(el) {
 function readableName(name) {
   const map = {
     "referral.source": "How did you hear about us",
+
     // Parent/Carer 1
     "parent1.relationshipToChild": "Relationship to the child",
     "parent1.financialResponsible": "Financially responsible for the child",
@@ -255,7 +258,7 @@ function elFor(name) {
   // Luego, marcar requeridos por paso con asterisco
   Object.keys(STEP_REQUIRED).forEach((k) => {
     STEP_REQUIRED[k].forEach((name) => {
-      if (OPTIONAL_FIELDS.has(name)) return; // por si acaso
+      if (OPTIONAL_FIELDS.has(name)) return;
       const el = elFor(name);
       if (!el) return;
       let label =
@@ -282,7 +285,6 @@ if (isReader) {
 
 // -------------------- Age desde DOB --------------------
 function parseYMD(s) {
-  // Evita problemas de timezone/parse en Safari/Firefox
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || "");
   if (!m) return null;
   const y = Number(m[1]),
@@ -290,7 +292,6 @@ function parseYMD(s) {
     d = Number(m[3]);
   return new Date(y, mo, d);
 }
-
 function calcAgeYearsFromDate(d) {
   if (!(d instanceof Date) || isNaN(d)) return "";
   const today = new Date();
@@ -299,16 +300,12 @@ function calcAgeYearsFromDate(d) {
   if (m < 0 || (m === 0 && today.getDate() < d.getDate())) years--;
   return years >= 0 ? String(years) : "";
 }
-
 function ensureAgeFromDob() {
   const dobEl = document.querySelector('[name="child.dob"]');
   const ageEl = document.querySelector('[name="child.age"]');
   if (!dobEl || !ageEl) return;
-
-  const d = parseYMD(dobEl.value);
-  const years = calcAgeYearsFromDate(d);
+  const years = calcAgeYearsFromDate(parseYMD(dobEl.value));
   if (years !== "") {
-    // set value SIEMPRE; no usar "||" para no borrar "0"
     ageEl.value = years;
     ageEl.placeholder = years;
   } else {
@@ -316,22 +313,15 @@ function ensureAgeFromDob() {
     ageEl.placeholder = "";
   }
 }
-
-// Inicializa: hace readonly y bindea eventos seguros
+// Inicializa: hace readonly y bindea eventos
 (function wireAgeAutofill() {
   const dobEl = document.querySelector('[name="child.dob"]');
   const ageEl = document.querySelector('[name="child.age"]');
   if (!dobEl || !ageEl) return;
-
-  // Evita edición manual: la calculamos siempre a partir del DOB
   ageEl.readOnly = true;
-
-  // Dispara en cuanto el usuario cambia/termina de elegir la fecha
   ["input", "change", "blur"].forEach((evt) =>
     dobEl.addEventListener(evt, ensureAgeFromDob)
   );
-
-  // Calcular al cargar (por si viene de draft/reader)
   ensureAgeFromDob();
 })();
 
@@ -346,12 +336,10 @@ function validateStep(idx) {
   let firstInvalid = null;
 
   required.forEach((name) => {
-    // Si por diseño marcaste algún requerido que sea opcional, lo saltamos
     if (OPTIONAL_FIELDS.has(name)) return;
     const el = elFor(name);
     if (!el) return;
 
-    // Checkboxes
     if (isCheckbox(name)) {
       const checked = el.checked;
       if (!checked) {
@@ -362,7 +350,6 @@ function validateStep(idx) {
       return;
     }
 
-    // Archivos
     if (isFile(name)) {
       if (!el.dataset.s3key) {
         missing.push(readableName(name));
@@ -372,7 +359,6 @@ function validateStep(idx) {
       return;
     }
 
-    // Email
     if (name === "parent1.email") {
       if (!isEmail((el.value || "").trim())) {
         missing.push(readableName(name));
@@ -382,7 +368,6 @@ function validateStep(idx) {
       return;
     }
 
-    // General
     const val = (el.value || "").trim();
     if (!val) {
       missing.push(readableName(name));
@@ -433,7 +418,6 @@ function showStep(n) {
 }
 
 function nextStep(n) {
-  // En reader no validamos al avanzar, pero sí navegamos
   if (!isReader && n === 1 && !validateStep(currentStep)) return;
   currentStep += n;
   if (currentStep >= 0 && currentStep < steps.length) showStep(currentStep);
@@ -481,13 +465,7 @@ if (grantForm) {
     });
 
     // Recalcular Age si vino DOB
-    const dobEl = elFor("child.dob");
-    const ageEl = elFor("child.age");
-    if (dobEl && ageEl) {
-      const years = calcAgeYears(dobEl.value);
-      ageEl.placeholder = years || "";
-      ageEl.value = years || "";
-    }
+    ensureAgeFromDob();
 
     if (typeof payload.step === "number") {
       currentStep = Math.min(Math.max(0, payload.step), steps.length - 1);
@@ -504,7 +482,6 @@ if (grantForm) {
 
 // -------------------- Modo edición --------------------
 if (!isReader) {
-  // ensureToken para uploads/primer guardado
   async function ensureToken() {
     let token = localStorage.getItem("draftToken");
     if (token) return token;
@@ -521,7 +498,6 @@ if (!isReader) {
     return token;
   }
 
-  // Validación mínima para guardar draft
   function validateDraftMin() {
     const missing = [];
     let firstInvalid = null;
@@ -615,7 +591,6 @@ if (!isReader) {
       const tokenFromResp = json.token || existingToken || "";
       if (json.token) localStorage.setItem("draftToken", json.token);
 
-      // Enviar link para retomar (una vez por token)
       const emailEl = elFor("parent1.email");
       const email = emailEl?.value?.trim();
       const token = tokenFromResp;
