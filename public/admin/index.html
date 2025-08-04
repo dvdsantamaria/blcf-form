@@ -4,42 +4,66 @@
     <meta charset="utf-8" />
     <title>BLCF – Admin</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- Bootstrap CSS -->
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+    <!-- Custom CSS -->
     <link href="admin.css" rel="stylesheet" />
   </head>
   <body>
-    <header>
-      <h1>BLCF – Admin</h1>
-      <div class="auth">
-        <input id="adminToken" type="password" placeholder="x-admin-token" />
-        <button id="saveToken">Admin View</button>
+    <!-- Navbar -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+      <div class="container-fluid">
+        <a class="navbar-brand" href="#">BLCF Admin</a>
+        <div class="d-flex align-items-center">
+          <div class="user-greeting text-light me-3"></div>
+        </div>
       </div>
-    </header>
-    <div class="user-greeting"></div>
+    </nav>
 
-    <main>
-      <section>
-        <h2>Submissions</h2>
-        <table id="tbl">
-          <thead>
-            <tr>
-              <th>submissionId</th>
-              <th>status</th>
-              <th>createdAt</th>
-              <th>lastActivityAt</th>
-              <th>email</th>
-              <th>Acciones</th>
-            </tr>
-          </thead>
-          <tbody id="tbody"></tbody>
-        </table>
-      </section>
+    <div class="container my-4">
+      <!-- Submissions Table -->
+      <div class="card">
+        <div class="card-header">
+          <h2 class="h5 mb-0">Submissions</h2>
+        </div>
+        <div class="card-body p-0">
+          <div class="table-responsive">
+            <table class="table table-striped table-hover mb-0">
+              <thead class="table-light">
+                <tr>
+                  <th>Submission ID</th>
+                  <th>Status</th>
+                  <th>Created At</th>
+                  <th>Last Activity</th>
+                  <th>Email</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
 
-      <section id="detail" class="hidden">
-        <h2>Detalle <span id="detToken"></span></h2>
-        <pre id="manifest"></pre>
-      </section>
-    </main>
+      <!-- Detail Section -->
+      <div id="detail" class="card mt-4 d-none">
+        <div class="card-header">
+          <h2 class="h6 mb-0">Detalle <span id="detToken"></span></h2>
+        </div>
+        <div class="card-body">
+          <pre id="manifest" class="bg-light p-3 rounded"></pre>
+        </div>
+      </div>
+    </div>
 
+    <!-- Magic link client -->
+    <script src="/api/admin/auth/client.js"></script>
+    <!-- Admin logic -->
     <script src="admin.js"></script>
+    <!-- Bootstrap JS Bundle -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   </body>
 </html>
