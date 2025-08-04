@@ -111,3 +111,16 @@ process.on("unhandledRejection", (err) =>
 process.on("uncaughtException", (err) =>
   console.error("Uncaught Exception:", err)
 );
+
+// ───────────────── ROUTER (para montar desde server.js) ─────────────────
+const router = express.Router();
+
+// Endpoints que usa el front:
+router.post("/save-draft", saveDraft);
+router.post("/submit-form", handleFormSubmission);
+router.get("/generate-upload-url", generateUploadUrl);
+
+// Reader API que usa /public/scripts.js con `${API_BASE}/form/view?...`
+router.get("/form/view", getViewData);
+
+export default router;
