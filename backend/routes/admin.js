@@ -1,6 +1,6 @@
 // backend/routes/admin.js
 import express from "express";
-import authAdmin from "../middleware/authAdmin.js";
+import { authAdminMagic } from "../middleware/AdminMagicToken.js";
 import {
   listSubmissions,
   getManifest,
@@ -9,7 +9,8 @@ import {
 } from "../controllers/adminController.js";
 
 const router = express.Router();
-router.use(authAdmin);
+// protegido por token JWT generado por magic link
+router.use(authAdminMagic());
 
 router.get("/submissions", listSubmissions);
 router.get("/submission/:token/manifest", getManifest);

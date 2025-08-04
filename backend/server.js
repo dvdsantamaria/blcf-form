@@ -1,6 +1,5 @@
 // backend/server.js
 import "dotenv/config";
-
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
@@ -14,6 +13,12 @@ import { fileURLToPath } from "url";
 import formRoutes from "./routes/form.js";
 import adminRoutes from "./routes/admin.js";
 import resumeRoutes from "./routes/resume.js";
+
+// 🧩 Import magic token login
+import {
+  buildAdminMagicRouter,
+  authAdminMagic,
+} from "./middleware/AdminMagicToken.js";
 
 const app = express();
 
@@ -54,9 +59,16 @@ console.log("ENV CHECK:", {
   ALLOW_ORIGINS: allowedOrigins,
 });
 
-/* ────────────── ROUTES ────────────── */
-app.use("/api", formRoutes); // /api/generate-upload-url, /api/save-draft, /api/submit-form, /api/form/view
-app.use("/api/admin", adminRoutes);
+/* ────────────── MAGIC TOKEN ADMIN AUTH ────────────── */
+// Ya NO pasamos config sensible, se toma todo de process.env
+const magic = buildAdminMagicRouter();
+// Los valores como ADMIN_ALLOWED_EMAILS, ADMIN_UI_BASE_URL, etc. se leen del .env
+
+app.use("/api/admin/auth", magic.router);
+app.use("/api/admin", authAdminMagic(magic.config), adminRoutes);
+
+/* ────────────── OTRAS RUTAS ────────────── */
+app.use("/api", formRoutes); // /api/generate-upload-url, etc.
 app.use("/api/resume", resumeRoutes);
 
 app.get("/api/health", (req, res) => {
@@ -77,13 +89,11 @@ app.use((err, req, res, next) => {
   }
   if (err) {
     console.error("Unhandled error:", err);
-    return res
-      .status(500)
-      .json({
-        ok: false,
-        error: "Internal Server Error",
-        details: err.message,
-      });
+    return res.status(500).json({
+      ok: false,
+      error: "Internal Server Error",
+      details: err.message,
+    });
   }
   next();
 });

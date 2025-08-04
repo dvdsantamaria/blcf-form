@@ -2,10 +2,9 @@
 import "dotenv/config";
 import { Resend } from "resend";
 
-const resend =
-  process.env.RESEND_API_KEY && process.env.SES_FROM
-    ? new Resend(process.env.RESEND_API_KEY)
-    : null;
+const resend = process.env.RESEND_API_KEY
+  ? new Resend(process.env.RESEND_API_KEY)
+  : null;
 
 function isAbsolute(url) {
   return /^https?:\/\//i.test(url);
@@ -29,24 +28,46 @@ function buildReaderLink(token) {
     : `${path}${sep}token=${encodeURIComponent(token)}`;
 }
 
+function dump(obj) {
+  try {
+    return JSON.stringify(obj, null, 2);
+  } catch {
+    return String(obj);
+  }
+}
+
 async function sendHtmlEmail({ to, subject, html, text, replyTo }) {
   try {
-    if (!resend || !to || !process.env.SES_FROM) {
-      console.warn("[Resend] Skipped (missing config)", { to });
+    const FROM =
+      process.env.RESEND_FROM ||
+      process.env.SES_FROM || // fallback (no recomendado si el dominio de SES no está verificado en Resend)
+      "onboarding@resend.dev"; // último recurso para test rápido
+
+    if (!resend) {
+      console.warn("[Resend] Skipped (missing RESEND_API_KEY)", { to });
+      return { ok: false, skipped: true };
+    }
+    if (!to || !FROM) {
+      console.warn("[Resend] Skipped (missing to/from)", { to, FROM });
       return { ok: false, skipped: true };
     }
 
     const { data, error } = await resend.emails.send({
-      from: process.env.SES_FROM,
+      from: FROM,
       to,
       subject,
       html,
       ...(replyTo ? { reply_to: replyTo } : {}),
     });
 
-    if (error) throw new Error(error.message);
-    console.log("[Resend] sent", { to, id: data.id });
-    return { ok: true, id: data.id };
+    if (error) {
+      console.error("[Resend] send error:", dump(error));
+      // Propagar mensaje útil si existe, si no el dump
+      throw new Error(error?.message || dump(error));
+    }
+
+    console.log("[Resend] sent", { to, id: data?.id });
+    return { ok: true, id: data?.id };
   } catch (e) {
     console.error("[Resend] error:", e?.message || e);
     return { ok: false, error: e?.message || String(e) };
