@@ -281,6 +281,7 @@ if (isReader) {
   document.querySelectorAll("input, textarea, select").forEach((el) => {
     el.disabled = true;
   });
+  showAllReaderMode();
 }
 
 // -------------------- Age desde DOB --------------------
@@ -398,6 +399,11 @@ function validateAllBeforeSubmit() {
 
 // -------------------- Navegación --------------------
 function showStep(n) {
+  if (isReader) {
+    // En modo reader siempre mostramos todo; no cambies visibilidad por step
+    return;
+  }
+
   steps.forEach((s, i) => s.classList.toggle("active", i === n));
 
   const prevBtn = document.querySelector('button[onclick="nextStep(-1)"]');
@@ -442,8 +448,9 @@ if (grantForm) {
     const token = qs.get("token");
     if (!token) return;
 
+    // 🔧 Corregido: endpoint correcto para el reader
     const res = await fetch(
-      `${API_BASE}/view?token=${encodeURIComponent(token)}`
+      `${API_BASE}/form/view?token=${encodeURIComponent(token)}`
     );
     if (!res.ok) return;
     const payload = await res.json();
@@ -525,7 +532,10 @@ if (!isReader) {
   document.querySelectorAll('input[type="file"]').forEach((input) => {
     input.addEventListener("change", async () => {
       const file = input.files[0];
+      // Si el usuario cambia el archivo, limpiar key previa hasta que suba
+      delete input.dataset.s3key;
       if (!file) return;
+
       const fieldName = input.name;
       const ext = file.name.split(".").pop().toLowerCase();
       const mimeMap = {
@@ -680,3 +690,16 @@ window.devClearResumeSession = async function () {
   showToast("Session cleared.");
   setTimeout(() => location.replace("/"), 500);
 };
+
+function showAllReaderMode() {
+  // marcar todos los pasos como activos (se muestran)
+  steps.forEach((s) => s.classList.add("active"));
+
+  // ocultar navegación y acciones
+  const prevBtn = document.querySelector('button[onclick="nextStep(-1)"]');
+  const nextBtn = document.querySelector('button[onclick="nextStep(1)"]');
+  if (prevBtn) prevBtn.style.display = "none";
+  if (nextBtn) nextBtn.style.display = "none";
+  if (submitBtn) submitBtn.style.display = "none";
+  if (saveBtn) saveBtn.style.display = "none";
+}

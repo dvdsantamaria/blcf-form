@@ -52,11 +52,10 @@ console.log("ENV CHECK:", {
   BUCKET: process.env.AWS_S3_BUCKET || process.env.AWS_BUCKET_NAME,
   REGION: process.env.AWS_REGION,
   ALLOW_ORIGINS: allowedOrigins,
-  ENABLE_SES_TEST: process.env.ENABLE_SES_TEST,
 });
 
 /* ────────────── ROUTES ────────────── */
-app.use("/api", formRoutes); // <- todo lo del form (save-draft, submit, presign, reader view)
+app.use("/api", formRoutes); // /api/generate-upload-url, /api/save-draft, /api/submit-form, /api/form/view
 app.use("/api/admin", adminRoutes);
 app.use("/api/resume", resumeRoutes);
 

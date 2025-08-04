@@ -18,7 +18,7 @@ router.get("/generate-upload-url", generateUploadUrl);
 // Draft
 router.post("/save-draft", upload.none(), saveDraft);
 
-// Reader view (tokenizado)
+// Reader view (tokenizado) -> /api/form/view
 router.get("/form/view", getViewData);
 
 // Submit final
