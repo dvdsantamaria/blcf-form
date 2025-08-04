@@ -443,7 +443,7 @@ if (grantForm) {
     if (!token) return;
 
     const res = await fetch(
-      `${API_BASE}/form/view?token=${encodeURIComponent(token)}`
+      `${API_BASE}/view?token=${encodeURIComponent(token)}`
     );
     if (!res.ok) return;
     const payload = await res.json();

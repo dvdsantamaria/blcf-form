@@ -6,7 +6,7 @@ import {
   generateUploadUrl,
   saveDraft,
   handleFormSubmission,
-  getViewData, // ✅ importar el handler correcto
+  getViewData,
 } from "../controllers/formController.js";
 
 const router = express.Router();
@@ -19,7 +19,7 @@ router.get("/generate-upload-url", generateUploadUrl);
 router.post("/save-draft", upload.none(), saveDraft);
 
 // Reader view (tokenizado)
-router.get("/view", getViewData); // ✅ usar getViewData
+router.get("/form/view", getViewData);
 
 // Submit final
 router.post("/submit-form", (req, res) => {

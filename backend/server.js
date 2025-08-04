@@ -14,13 +14,13 @@ import { fileURLToPath } from "url";
 import formRoutes from "./routes/form.js";
 import adminRoutes from "./routes/admin.js";
 import resumeRoutes from "./routes/resume.js";
-import formRouter from "./controllers/formController.js";
 
 const app = express();
 
 /* ────────────── SECURITY & MIDDLEWARE ────────────── */
 app.set("trust proxy", 1);
 app.use(helmet());
+
 const allowedOrigins = (process.env.CORS_ALLOW_ORIGINS || "")
   .split(",")
   .map((s) => s.trim())
@@ -56,8 +56,7 @@ console.log("ENV CHECK:", {
 });
 
 /* ────────────── ROUTES ────────────── */
-app.use("/api", formRoutes);
-app.use("/api/form", formRouter);
+app.use("/api", formRoutes); // <- todo lo del form (save-draft, submit, presign, reader view)
 app.use("/api/admin", adminRoutes);
 app.use("/api/resume", resumeRoutes);
 
@@ -79,11 +78,13 @@ app.use((err, req, res, next) => {
   }
   if (err) {
     console.error("Unhandled error:", err);
-    return res.status(500).json({
-      ok: false,
-      error: "Internal Server Error",
-      details: err.message,
-    });
+    return res
+      .status(500)
+      .json({
+        ok: false,
+        error: "Internal Server Error",
+        details: err.message,
+      });
   }
   next();
 });
@@ -104,23 +105,9 @@ mongoose
     process.exit(1);
   });
 
-/* ────────────── PROCESS-LEVEL ERROR HANDLERS ────────────── */
 process.on("unhandledRejection", (err) =>
   console.error("Unhandled Rejection:", err)
 );
 process.on("uncaughtException", (err) =>
   console.error("Uncaught Exception:", err)
 );
-
-// ───────────────── ROUTER (para montar desde server.js) ─────────────────
-const router = express.Router();
-
-// Endpoints que usa el front:
-router.post("/save-draft", saveDraft);
-router.post("/submit-form", handleFormSubmission);
-router.get("/generate-upload-url", generateUploadUrl);
-
-// Reader API que usa /public/scripts.js con `${API_BASE}/form/view?...`
-router.get("/form/view", getViewData);
-
-export default router;
