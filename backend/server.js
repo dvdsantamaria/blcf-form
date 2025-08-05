@@ -1,4 +1,4 @@
-/* backend/server.js */
+// backend/server.js
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
@@ -11,8 +11,8 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 import formRoutes from "./routes/form.js";
-import adminRoutes from "./routes/admin.js";
 import resumeRoutes from "./routes/resume.js";
+import adminRoutes from "./routes/admin.js";
 
 import {
   buildAdminMagicRouter,
@@ -52,22 +52,23 @@ app.use(express.urlencoded({ extended: true, limit: "2mb" }));
 app.use(rateLimit({ windowMs: 5 * 60 * 1000, max: 500 }));
 
 console.log("ENV CHECK:", {
-  BUCKET: process.env.AWS_S3_BUCKET || process.env.AWS_BUCKET_NAME,
-  REGION: process.env.AWS_REGION,
-  ALLOW_ORIGINS: allowedOrigins,
+  MONGO_URI: process.env.MONGO_URI,
+  AWS_S3_BUCKET: process.env.AWS_S3_BUCKET || process.env.AWS_BUCKET_NAME,
+  AWS_REGION: process.env.AWS_REGION,
+  CORS_ALLOW_ORIGINS: allowedOrigins,
 });
 
 /* ───────────── ROUTES ───────────── */
-app.use("/api", formRoutes); // presigned-url, save-draft, submit-form, etc.
+app.use("/api", formRoutes);
 app.use("/api/resume", resumeRoutes);
 
-// Health check
+// simple health check
 app.get("/api/status", (_req, res) => {
   res.json({ ok: true, ts: new Date().toISOString() });
 });
 
 /* ───────────── ADMIN MAGIC TOKEN ───────────── */
-const magic = buildAdminMagicRouter(); // lee envs: ADMIN_ALLOWED_EMAILS, etc.
+const magic = buildAdminMagicRouter();
 app.use("/api/admin/auth", magic.router);
 app.use("/api/admin", authAdminMagic(magic.config), adminRoutes);
 
