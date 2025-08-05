@@ -1,5 +1,5 @@
-// backend/server.js
 import "dotenv/config";
+
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
@@ -7,25 +7,16 @@ import cookieParser from "cookie-parser";
 import rateLimit from "express-rate-limit";
 import mongoose from "mongoose";
 import path from "path";
-import multer from "multer";
 import { fileURLToPath } from "url";
 
 import formRoutes from "./routes/form.js";
 import adminRoutes from "./routes/admin.js";
 import resumeRoutes from "./routes/resume.js";
-
-// 🧩 Import magic token login
-import {
-  buildAdminMagicRouter,
-  authAdminMagic,
-} from "./middleware/AdminMagicToken.js";
-
 const app = express();
 
 /* ────────────── SECURITY & MIDDLEWARE ────────────── */
 app.set("trust proxy", 1);
 app.use(helmet());
-
 const allowedOrigins = (process.env.CORS_ALLOW_ORIGINS || "")
   .split(",")
   .map((s) => s.trim())
@@ -57,6 +48,15 @@ console.log("ENV CHECK:", {
   BUCKET: process.env.AWS_S3_BUCKET || process.env.AWS_BUCKET_NAME,
   REGION: process.env.AWS_REGION,
   ALLOW_ORIGINS: allowedOrigins,
+});
+
+/* ────────────── ROUTES ────────────── */
+app.use("/api", formRoutes);
+app.use("/api/admin", adminRoutes);
+app.use("/api/resume", resumeRoutes);
+
+app.get("/api/health", (_req, res) => {
+  res.json({ ok: true, ts: new Date().toISOString() });
 });
 
 /* ────────────── MAGIC TOKEN ADMIN AUTH ────────────── */

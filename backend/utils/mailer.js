@@ -36,12 +36,12 @@ function dump(obj) {
   }
 }
 
-async function sendHtmlEmail({ to, subject, html, text, replyTo }) {
+export async function sendHtmlEmail({ to, subject, html, text, replyTo }) {
   try {
     const FROM =
       process.env.RESEND_FROM ||
       process.env.SES_FROM || // fallback (no recomendado si el dominio de SES no está verificado en Resend)
-      "onboarding@resend.dev"; // último recurso para test rápido
+      "onboarding@resend.dev";
 
     if (!resend) {
       console.warn("[Resend] Skipped (missing RESEND_API_KEY)", { to });
@@ -62,7 +62,6 @@ async function sendHtmlEmail({ to, subject, html, text, replyTo }) {
 
     if (error) {
       console.error("[Resend] send error:", dump(error));
-      // Propagar mensaje útil si existe, si no el dump
       throw new Error(error?.message || dump(error));
     }
 
