@@ -16,6 +16,46 @@
     <div id="auth-wrapper" class="auth"></div>
 
     <!-- ✅ Admin UI -->
+
+    <script type="module">
+      import { renderLoginUI, checkAuth, setAdminToken } from "./admin.js";
+
+      (async function handleMagicLink() {
+        const qs = new URLSearchParams(location.search);
+        const magic = qs.get("m");
+        if (!magic) return;
+
+        try {
+          const res = await fetch(
+            `/api/admin/auth/verify?token=${encodeURIComponent(magic)}`
+          );
+          if (!res.ok) throw new Error(await res.text());
+          const { token } = await res.json();
+
+          setAdminToken(token);
+          history.replaceState({}, "", location.pathname);
+          window.location.reload();
+        } catch (err) {
+          console.error("Magic link verification failed:", err);
+          alert("Login failed. Try requesting a new magic link.");
+        }
+      })();
+
+      async function main() {
+        const authWrapper = document.getElementById("auth-wrapper");
+        const adminPanel = document.getElementById("adminPanel");
+
+        const authed = await checkAuth();
+        if (authed) {
+          authWrapper.classList.add("hidden");
+          adminPanel.classList.remove("hidden");
+        } else {
+          renderLoginUI({ selector: "#auth-wrapper" });
+        }
+      }
+
+      main();
+    </script>
     <main id="adminPanel" class="container hidden">
       <header>
         <h4 class="m-0">Submissions</h4>
@@ -71,6 +111,5 @@
 
       main();
     </script>
-    <script src="/api/admin/auth/client.js"></script>
   </body>
 </html>
