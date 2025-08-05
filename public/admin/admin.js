@@ -1,5 +1,6 @@
 // admin.js
 
+const API_BASE_AUTH = "/api/admin/auth";
 const API_BASE = "/api/admin";
 
 // === Token ===
@@ -47,7 +48,7 @@ export function renderLoginUI({ selector = "body" } = {}) {
     if (!email) return;
 
     try {
-      const res = await fetch(`${API_BASE}/request-token`, {
+      const res = await fetch(`${API_BASE_AUTH}/request`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email }),

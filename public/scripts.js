@@ -444,32 +444,35 @@ if (grantForm) {
 (async function loadForReader() {
   try {
     if (!isReader) return;
+
     const qs = new URLSearchParams(location.search);
     const token = qs.get("token");
     if (!token) return;
 
-    // 🔧 Corregido: endpoint correcto para el reader
-    const res = await fetch(
-      `${API_BASE}/form/view?token=${encodeURIComponent(token)}`
-    );
+    // ✅ Fixed: correcto endpoint de lectura para modo lector
+    const res = await fetch(`/api/form/view?token=${encodeURIComponent(token)}`);
     if (!res.ok) return;
+
     const payload = await res.json();
     const data = payload?.data || {};
 
     Object.entries(data).forEach(([name, value]) => {
       const input = elFor(name);
       if (!input) return;
+
       if (input.type === "checkbox") {
         input.checked = !!value;
       } else if (input.type === "radio") {
-        const radio = document.querySelector(
-          `input[name="${name}"][value="${value}"]`
-        );
+        const radio = document.querySelector(`input[name="${name}"][value="${value}"]`);
         if (radio) radio.checked = true;
       } else {
         input.value = value ?? "";
       }
     });
+  } catch (err) {
+    console.error("Error loading reader form:", err);
+  }
+})();
 
     // Recalcular Age si vino DOB
     ensureAgeFromDob();
