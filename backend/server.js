@@ -100,7 +100,9 @@ app.use((err, req, res, next) => {
 
 /* ────────────── START SERVER ────────────── */
 const PORT = process.env.PORT || 3000;
-
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`BLCF backend running on http://0.0.0.0:${PORT}`);
+});
 mongoose
   .connect(process.env.MONGO_URI, { serverSelectionTimeoutMS: 15000 })
   .then(() => {

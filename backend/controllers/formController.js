@@ -132,7 +132,6 @@ export const saveDraft = async (req, res) => {
     return res.status(500).json({ ok: false, error: "Internal Server Error" });
   }
 };
-
 // ───────────────── SUBMIT (FINAL) ─────────────────
 export const handleFormSubmission = async (req, res) => {
   try {
@@ -192,9 +191,13 @@ export const handleFormSubmission = async (req, res) => {
       { upsert: true }
     );
 
-    // ── Emails (paciente + admins) usando utils/mailer.js
+    // ── Emails (paciente + admins)
+    const emailTasks = [];
+
     if (patientEmail) {
-      await sendSubmissionMail({ to: patientEmail, token, role: "user" });
+      emailTasks.push(
+        sendSubmissionMail({ to: patientEmail, token, role: "user" })
+      );
     }
 
     const admins = (process.env.ADMIN_NOTIFY_TO || process.env.NOTIFY_TO || "")
@@ -202,16 +205,18 @@ export const handleFormSubmission = async (req, res) => {
       .map((s) => s.trim())
       .filter(Boolean);
 
-    await Promise.all(
-      admins.map((adminEmail) =>
+    for (const adminEmail of admins) {
+      emailTasks.push(
         sendSubmissionMail({ to: adminEmail, token, role: "admin" })
-      )
-    );
+      );
+    }
+
+    await Promise.all(emailTasks);
 
     console.log("✅ Submission saved:", token);
     return res.status(200).json({ ok: true, token, s3Key: finalKey });
   } catch (err) {
-    console.error("submit error:", err);
+    console.error("❌ submit error:", err);
     return res.status(500).json({ ok: false, error: "Internal Server Error" });
   }
 };
