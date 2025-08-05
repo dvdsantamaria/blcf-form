@@ -1,21 +1,13 @@
 // backend/controllers/resumeController.js
 import "dotenv/config";
 import crypto from "crypto";
-import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
+import fetch from "node-fetch";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
+
 import ResumeToken from "../models/ResumeToken.js";
 import FormDraft from "../models/FormDraft.js";
 
-const ses = new SESClient({
-  region: process.env.AWS_REGION,
-  credentials: process.env.AWS_ACCESS_KEY_ID
-    ? {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-      }
-    : undefined,
-});
-
+/* ---------- AWS S3 ---------- */
 const s3 = new S3Client({
   region: process.env.AWS_REGION,
   credentials: process.env.AWS_ACCESS_KEY_ID
@@ -26,97 +18,96 @@ const s3 = new S3Client({
     : undefined,
 });
 
+/* ---------- Utilidades ---------- */
 function genToken(len = 24) {
   return crypto.randomBytes(len).toString("base64url");
 }
 function isEmail(s) {
   return typeof s === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
 }
-
-const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || "").replace(/\/$/, "");
-const BACKEND_BASE_URL = (process.env.BACKEND_BASE_URL || "").replace(
-  /\/$/,
-  ""
-);
-
 async function streamToString(stream) {
   const chunks = [];
   for await (const chunk of stream) chunks.push(chunk);
   return Buffer.concat(chunks).toString("utf-8");
 }
 
+/* ---------- Constantes ---------- */
+const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || "").replace(/\/$/, "");
+const BACKEND_BASE_URL = (process.env.BACKEND_BASE_URL || "").replace(
+  /\/$/,
+  ""
+);
 const S3_BUCKET =
   process.env.S3_BUCKET || process.env.AWS_S3_BUCKET || process.env.BUCKET_NAME;
 
-/* Send email via SES with clear logs (returns { ok, id } or { ok:false, code, message }) */
-async function sendSesEmail(to, subject, text) {
+/* ========================
+   EMAIL via Resend
+   ======================== */
+async function sendResendEmail(to, subject, text) {
   try {
-    if (!ses) {
-      console.error("[SES] client not initialized");
-      return {
-        ok: false,
-        code: "NO_SES_CLIENT",
-        message: "SES client not initialized",
-      };
+    const RESEND_KEY = process.env.RESEND_API_KEY;
+    const FROM =
+      process.env.RESEND_FROM || "no-reply@grants.beyondlimitscf.org.au";
+
+    if (!RESEND_KEY) {
+      console.error("[Resend] RESEND_API_KEY not set");
+      return { ok: false, code: "NO_API_KEY" };
     }
-    if (!process.env.SES_FROM) {
-      console.error("[SES] SES_FROM not set");
-      return { ok: false, code: "NO_FROM", message: "SES_FROM not set" };
-    }
-    if (!to || !isEmail(to)) {
-      console.error("[SES] invalid recipient:", to);
-      return { ok: false, code: "BAD_TO", message: "Invalid recipient" };
+    if (!isEmail(to)) {
+      console.error("[Resend] bad recipient:", to);
+      return { ok: false, code: "BAD_TO" };
     }
 
-    const cmd = new SendEmailCommand({
-      Destination: { ToAddresses: [to] },
-      Source: process.env.SES_FROM,
-      Message: {
-        Subject: { Data: subject },
-        Body: { Text: { Data: text } },
+    const payload = {
+      from: FROM,
+      to: [to],
+      subject,
+      text,
+    };
+
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${RESEND_KEY}`,
+        "Content-Type": "application/json",
       },
+      body: JSON.stringify(payload),
     });
 
-    console.log("[SES] sending", { to, from: process.env.SES_FROM, subject });
-    const out = await ses.send(cmd);
-    console.log("[SES] sent", { to, id: out?.MessageId });
-    return { ok: true, id: out?.MessageId };
+    if (!res.ok) {
+      const err = await res.text();
+      console.error("[Resend] error", err);
+      return { ok: false, code: "RESEND_ERR", message: err };
+    }
+
+    const out = await res.json();
+    console.log("[Resend] sent", { to, id: out?.id });
+    return { ok: true, id: out?.id };
   } catch (e) {
-    const code = e?.Code || e?.name || "SES_ERROR";
-    const message = e?.Error?.Message || e?.message || String(e);
-    console.error("[SES] error", {
-      to,
-      from: process.env.SES_FROM,
-      code,
-      message,
-    });
-    return { ok: false, code, message };
+    console.error("[Resend] exception", e);
+    return { ok: false, code: "EXCEPTION", message: e?.message || String(e) };
   }
 }
 
-/* POST /api/resume/send-link  body: { email, token } */
+/* ========================
+   CONTROLLERS
+   ======================== */
+
+/* POST /api/resume/send-link */
 export async function sendResumeLink(req, res) {
   try {
-    console.log("[sendResumeLink] body received:", req.body);
     const { email, token } = req.body || {};
-    if (!email || !isEmail(email)) {
+    if (!isEmail(email))
       return res.status(400).json({ ok: false, error: "Invalid email" });
-    }
-    if (!token) {
+    if (!token)
       return res.status(400).json({ ok: false, error: "Missing token" });
-    }
-    console.log("[sendResumeLink] email:", email, "token:", token);
 
     const draft = await FormDraft.findOne({ token }).lean();
-    if (!draft) {
-      return res
-        .status(404)
-        .json({ ok: false, error: "Draft not found for that token" });
-    }
+    if (!draft)
+      return res.status(404).json({ ok: false, error: "Draft not found" });
 
     const rt = genToken(24);
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
-
     await ResumeToken.create({
       resumeToken: rt,
       submissionId: token,
@@ -124,24 +115,21 @@ export async function sendResumeLink(req, res) {
       expiresAt,
     });
 
-    const exchangeUrl =
+    const exchangeUrl = `${
       BACKEND_BASE_URL || PUBLIC_BASE_URL
-        ? `${
-            BACKEND_BASE_URL || PUBLIC_BASE_URL
-          }/api/resume/exchange?rt=${encodeURIComponent(rt)}`
-        : `EXCHANGE: /api/resume/exchange?rt=${rt}`;
+    }/api/resume/exchange?rt=${encodeURIComponent(rt)}`;
 
-    const subject = "Resume your application";
-    const text = `Hello,
+    const mail = await sendResendEmail(
+      email,
+      "Resume your application",
+      `Hello,
 
-Use this secure link (valid 24h) to resume your application:
+Use this secure link (valid 24 h) to resume your application:
 
 ${exchangeUrl}
 
-If you didn't request this, please ignore this email.`;
-
-    const mail = await sendSesEmail(email, subject, text);
-    console.log("[sendResumeLink] SES mail result:", mail);
+If you didn't request this, please ignore this email.`
+    );
 
     await FormDraft.findOneAndUpdate(
       { token },
@@ -149,7 +137,6 @@ If you didn't request this, please ignore this email.`;
       { upsert: true }
     );
 
-    // Devolvemos exchangeUrl para debug rápido en el front si hace falta
     return res.json({ ok: true, mail, exchangeUrl });
   } catch (err) {
     console.error("sendResumeLink error:", err);
@@ -157,34 +144,29 @@ If you didn't request this, please ignore this email.`;
   }
 }
 
-/* GET /api/resume/exchange?rt=...  (sets cookie and redirects to front) */
+/* GET /api/resume/exchange */
 export async function exchangeResumeToken(req, res) {
   try {
     const { rt } = req.query || {};
     if (!rt) return res.status(400).send("Missing token");
 
-    console.log("[exchangeResumeToken] Received token:", rt);
-
     const doc = await ResumeToken.findOne({ resumeToken: rt }).lean();
     if (!doc) return res.status(404).send("Token not found");
     if (doc.used) return res.status(410).send("Token already used");
-    if (doc.expiresAt && doc.expiresAt.getTime() < Date.now()) {
+    if (doc.expiresAt && doc.expiresAt.getTime() < Date.now())
       return res.status(410).send("Token expired");
-    }
 
     await ResumeToken.updateOne({ resumeToken: rt }, { $set: { used: true } });
 
-    const cookieOpts = {
+    res.cookie("resume", doc.submissionId, {
       httpOnly: true,
       secure: true,
       sameSite: "lax",
       maxAge: 24 * 60 * 60 * 1000,
       path: "/",
-    };
-    res.cookie("resume", doc.submissionId, cookieOpts);
+    });
 
     const redirectTo = PUBLIC_BASE_URL ? `${PUBLIC_BASE_URL}/?resumed=1` : "/";
-    console.log("[exchangeResumeToken] Redirecting to:", redirectTo);
     return res.redirect(302, redirectTo);
   } catch (err) {
     console.error("exchangeResumeToken error:", err);
@@ -192,24 +174,20 @@ export async function exchangeResumeToken(req, res) {
   }
 }
 
-/* GET /api/resume/get-draft?token=...  (returns plain data for form) */
+/* GET /api/resume/get-draft */
 export async function getDraft(req, res) {
   try {
     const token = req.query?.token || req.cookies?.resume;
-    if (!token) {
+    if (!token)
       return res.status(400).json({ ok: false, error: "Missing token" });
-    }
-    console.log("[getDraft] Token:", token);
 
     const doc = await FormDraft.findOne({ token }).lean();
-    if (!doc || !doc.s3Key) {
+    if (!doc?.s3Key)
       return res.status(404).json({ ok: false, error: "Draft not found" });
-    }
-    if (!S3_BUCKET) {
+    if (!S3_BUCKET)
       return res
         .status(500)
         .json({ ok: false, error: "Missing S3 bucket env" });
-    }
 
     const obj = await s3.send(
       new GetObjectCommand({ Bucket: S3_BUCKET, Key: doc.s3Key })
@@ -227,76 +205,24 @@ export async function getDraft(req, res) {
   }
 }
 
-/* GET /api/resume/whoami -> { ok, token } */
+/* GET /api/resume/whoami */
 export async function whoAmI(req, res) {
   try {
-    const token = req.cookies?.resume;
-    console.log("[whoAmI] Resume cookie token:", token);
-    return res.json({ ok: true, token: token || null });
+    const token = req.cookies?.resume || null;
+    return res.json({ ok: true, token });
   } catch (err) {
     console.error("whoAmI error:", err);
     return res.status(500).json({ ok: false, error: "Internal Server Error" });
   }
 }
 
-/* POST /api/resume/logout (clears cookie) */
+/* POST /api/resume/logout */
 export async function logout(req, res) {
   try {
     res.clearCookie("resume", { path: "/" });
     return res.json({ ok: true });
   } catch (err) {
     console.error("logout error:", err);
-    return res.status(500).json({ ok: false, error: "Internal Server Error" });
-  }
-}
-
-/* DEV ONLY: test email endpoint
-   Enabled only if process.env.ENABLE_SES_TEST === "1"
-   GET /api/resume/test-email?email=...&token=...
-*/
-export async function testSes(req, res) {
-  try {
-    if (process.env.ENABLE_SES_TEST !== "1") {
-      return res.status(403).json({ ok: false, error: "Disabled" });
-    }
-    const email = req.query?.email;
-    const token = req.query?.token;
-    if (!email || !isEmail(email) || !token) {
-      return res
-        .status(400)
-        .json({ ok: false, error: "Missing email or token" });
-    }
-    const draft = await FormDraft.findOne({ token }).lean();
-    if (!draft)
-      return res.status(404).json({ ok: false, error: "Draft not found" });
-
-    const rt = genToken(24);
-    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
-    await ResumeToken.create({
-      resumeToken: rt,
-      submissionId: token,
-      email,
-      expiresAt,
-    });
-
-    const exchangeUrl =
-      BACKEND_BASE_URL || PUBLIC_BASE_URL
-        ? `${
-            BACKEND_BASE_URL || PUBLIC_BASE_URL
-          }/api/resume/exchange?rt=${encodeURIComponent(rt)}`
-        : `EXCHANGE: /api/resume/exchange?rt=${rt}`;
-
-    const subject = "BLCF test email";
-    const text = `Test link:
-
-${exchangeUrl}
-
-(24h)`;
-
-    const mail = await sendSesEmail(email, subject, text);
-    return res.json({ ok: true, mail, exchangeUrl });
-  } catch (e) {
-    console.error("testSes error:", e);
     return res.status(500).json({ ok: false, error: "Internal Server Error" });
   }
 }
