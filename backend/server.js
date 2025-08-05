@@ -12,7 +12,6 @@ import { fileURLToPath } from "url";
 import formRoutes from "./routes/form.js";
 import adminRoutes from "./routes/admin.js";
 import resumeRoutes from "./routes/resume.js";
-import { buildAdminMagicRouter, authAdminMagic } from "./routes/adminAuth.js"; // asumido
 
 const app = express();
 
@@ -111,3 +110,10 @@ process.on("unhandledRejection", (err) =>
 process.on("uncaughtException", (err) =>
   console.error("Uncaught Exception:", err)
 );
+
+import {
+  saveDraft,
+  handleFormSubmission,
+  generateUploadUrl,
+  getViewData,
+} from "./controllers/formController.js";
