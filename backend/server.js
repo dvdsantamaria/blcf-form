@@ -1,3 +1,4 @@
+/* backend/server.js */
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
@@ -17,9 +18,10 @@ import {
   buildAdminMagicRouter,
   authAdminMagic,
 } from "./middleware/AdminMagicToken.js";
+
 const app = express();
 
-/* ────────────── SECURITY & MIDDLEWARE ────────────── */
+/* ───────────── SECURITY & MIDDLEWARE ───────────── */
 app.set("trust proxy", 1);
 app.use(helmet());
 
@@ -55,8 +57,8 @@ console.log("ENV CHECK:", {
   ALLOW_ORIGINS: allowedOrigins,
 });
 
-/* ────────────── ROUTES ────────────── */
-app.use("/api", formRoutes);
+/* ───────────── ROUTES ───────────── */
+app.use("/api", formRoutes); // presigned-url, save-draft, submit-form, etc.
 app.use("/api/resume", resumeRoutes);
 
 // Health check
@@ -64,35 +66,30 @@ app.get("/api/status", (_req, res) => {
   res.json({ ok: true, ts: new Date().toISOString() });
 });
 
-/* ────────────── ADMIN MAGIC TOKEN AUTH ────────────── */
-const magic = buildAdminMagicRouter();
+/* ───────────── ADMIN MAGIC TOKEN ───────────── */
+const magic = buildAdminMagicRouter(); // lee envs: ADMIN_ALLOWED_EMAILS, etc.
 app.use("/api/admin/auth", magic.router);
 app.use("/api/admin", authAdminMagic(magic.config), adminRoutes);
 
-/* ────────────── STATIC ADMIN FRONTEND ────────────── */
+/* ───────────── STATIC ADMIN UI ───────────── */
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 app.use("/admin", express.static(path.join(__dirname, "../public/admin")));
 
-/* ────────────── GLOBAL ERROR HANDLER ────────────── */
-app.use((err, req, res, next) => {
+/* ───────────── GLOBAL ERROR HANDLER ───────────── */
+app.use((err, _req, res, _next) => {
   if (err instanceof multer.MulterError) {
     return res
       .status(400)
       .json({ ok: false, error: "Multer error", details: err.message });
   }
-  if (err) {
-    console.error("Unhandled error:", err);
-    return res.status(500).json({
-      ok: false,
-      error: "Internal Server Error",
-      details: err.message,
-    });
-  }
-  next();
+  console.error("Unhandled error:", err);
+  res
+    .status(500)
+    .json({ ok: false, error: "Internal Server Error", details: err.message });
 });
 
-/* ────────────── START SERVER ────────────── */
+/* ───────────── START SERVER ───────────── */
 const PORT = process.env.PORT || 3000;
 
 mongoose
@@ -114,10 +111,3 @@ process.on("unhandledRejection", (err) =>
 process.on("uncaughtException", (err) =>
   console.error("Uncaught Exception:", err)
 );
-
-import {
-  saveDraft,
-  handleFormSubmission,
-  generateUploadUrl,
-  getViewData,
-} from "./controllers/formController.js";
