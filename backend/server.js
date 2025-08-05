@@ -59,14 +59,29 @@ console.log("ENV CHECK:", {
 });
 
 /* ───────────── ROUTES ───────────── */
-app.use("/api", formRoutes);
-app.use("/api/resume", resumeRoutes);
 
-// simple health check
+// health check antes de rate limiting para que nunca lo bloquee
 app.get("/api/status", (_req, res) => {
   res.json({ ok: true, ts: new Date().toISOString() });
 });
 
+// APIs de formulario
+app.use("/api", formRoutes);
+
+// logging de todo lo que llega a resume
+app.use("/api/resume", (req, res, next) => {
+  console.log(
+    "[resume] incoming:",
+    req.method,
+    req.originalUrl,
+    "body→",
+    req.body
+  );
+  next();
+});
+
+// resume routes (send-link, exchange, whoami, etc)
+app.use("/api/resume", resumeRoutes);
 /* ───────────── ADMIN MAGIC TOKEN ───────────── */
 const magic = buildAdminMagicRouter();
 app.use("/api/admin/auth", magic.router);
