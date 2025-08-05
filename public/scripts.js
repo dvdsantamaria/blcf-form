@@ -542,33 +542,56 @@
 
         // send resume link once per token
         const emailEl = elFor("parent1.email");
-        const email = emailEl?.value?.trim();
-        const token = tokenFromResp;
-        const sentKey = `resumeSent:${token}`;
-        if (
-          email &&
-          isEmail(email) &&
-          token &&
-          !localStorage.getItem(sentKey)
-        ) {
-          const linkResp = await fetch(`${API_BASE}/resume/send-link`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ token, email }),
-          });
-          if (!linkResp.ok) {
-            console.error("resume send-link failed", await linkResp.text());
-          } else {
-            localStorage.setItem(sentKey, "1");
-          }
-        }
+const email = emailEl?.value?.trim();
+const token = tokenFromResp;
+const sentKey = token ? `resumeSent:${token}` : null;
 
-        showToast("Draft saved.");
-      } catch (err) {
-        console.error("saveStep error", err);
-        showToast("Error saving draft.");
-      }
-    };
+try {
+  const already = sentKey ? localStorage.getItem(sentKey) : null;
+  console.log("[resume][client] decide-send", {
+    email,
+    isEmail: isEmail(email),
+    token,
+    sentKey,
+    already,
+  });
+
+  // Forzar envío durante pruebas: poné ALWAYS_SEND = true
+  const ALWAYS_SEND = false;
+
+  if (email && isEmail(email) && token && (ALWAYS_SEND || !already)) {
+    const linkResp = await fetch(`${API_BASE}/resume/send-link`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, email }),
+    });
+
+    const text = await linkResp.text();
+    console.log("[resume][client] send-link result", {
+      ok: linkResp.ok,
+      status: linkResp.status,
+      body: text,
+    });
+
+    if (!linkResp.ok) {
+      showToast("Could not send email.");
+    } else if (sentKey && !ALWAYS_SEND) {
+      localStorage.setItem(sentKey, "1");
+      showToast("Draft saved and email sent.");
+    }
+  } else {
+    console.log("[resume][client] skipped-send", {
+      reason: "guard failed",
+      email,
+      isEmail: isEmail(email),
+      token,
+      already,
+    });
+  }
+} catch (e) {
+  console.error("send-link error:", e);
+  showToast("Email send error.");
+}
 
     // Final submit
     grantForm?.addEventListener("submit", async (e) => {
