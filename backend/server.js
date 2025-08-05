@@ -1,22 +1,25 @@
 import "dotenv/config";
-
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import cookieParser from "cookie-parser";
 import rateLimit from "express-rate-limit";
 import mongoose from "mongoose";
+import multer from "multer";
 import path from "path";
 import { fileURLToPath } from "url";
 
 import formRoutes from "./routes/form.js";
 import adminRoutes from "./routes/admin.js";
 import resumeRoutes from "./routes/resume.js";
+import { buildAdminMagicRouter, authAdminMagic } from "./routes/adminAuth.js"; // asumido
+
 const app = express();
 
 /* ────────────── SECURITY & MIDDLEWARE ────────────── */
 app.set("trust proxy", 1);
 app.use(helmet());
+
 const allowedOrigins = (process.env.CORS_ALLOW_ORIGINS || "")
   .split(",")
   .map((s) => s.trim())
@@ -43,7 +46,6 @@ app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true, limit: "2mb" }));
 app.use(rateLimit({ windowMs: 5 * 60 * 1000, max: 500 }));
 
-/* ────────────── ENV CHECK ────────────── */
 console.log("ENV CHECK:", {
   BUCKET: process.env.AWS_S3_BUCKET || process.env.AWS_BUCKET_NAME,
   REGION: process.env.AWS_REGION,
@@ -52,35 +54,24 @@ console.log("ENV CHECK:", {
 
 /* ────────────── ROUTES ────────────── */
 app.use("/api", formRoutes);
-app.use("/api/admin", adminRoutes);
 app.use("/api/resume", resumeRoutes);
 
-app.get("/api/health", (_req, res) => {
+// Health check
+app.get("/api/status", (_req, res) => {
   res.json({ ok: true, ts: new Date().toISOString() });
 });
 
-/* ────────────── MAGIC TOKEN ADMIN AUTH ────────────── */
-// Ya NO pasamos config sensible, se toma todo de process.env
+/* ────────────── ADMIN MAGIC TOKEN AUTH ────────────── */
 const magic = buildAdminMagicRouter();
-// Los valores como ADMIN_ALLOWED_EMAILS, ADMIN_UI_BASE_URL, etc. se leen del .env
-
 app.use("/api/admin/auth", magic.router);
 app.use("/api/admin", authAdminMagic(magic.config), adminRoutes);
-
-/* ────────────── OTRAS RUTAS ────────────── */
-app.use("/api", formRoutes); // /api/generate-upload-url, etc.
-app.use("/api/resume", resumeRoutes);
-
-app.get("/api/health", (req, res) => {
-  res.json({ ok: true, ts: new Date().toISOString() });
-});
 
 /* ────────────── STATIC ADMIN FRONTEND ────────────── */
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 app.use("/admin", express.static(path.join(__dirname, "../public/admin")));
 
-// Global error handler
+/* ────────────── GLOBAL ERROR HANDLER ────────────── */
 app.use((err, req, res, next) => {
   if (err instanceof multer.MulterError) {
     return res
@@ -100,19 +91,17 @@ app.use((err, req, res, next) => {
 
 /* ────────────── START SERVER ────────────── */
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`BLCF backend running on http://0.0.0.0:${PORT}`);
-});
+
 mongoose
   .connect(process.env.MONGO_URI, { serverSelectionTimeoutMS: 15000 })
   .then(() => {
-    console.log("Connected to MongoDB Atlas");
+    console.log("✅ Connected to MongoDB");
     app.listen(PORT, "0.0.0.0", () => {
-      console.log(`BLCF backend running on http://0.0.0.0:${PORT}`);
+      console.log(`✅ BLCF backend running on http://0.0.0.0:${PORT}`);
     });
   })
   .catch((err) => {
-    console.error("Mongo connection error:", err);
+    console.error("❌ Mongo connection error:", err);
     process.exit(1);
   });
 
