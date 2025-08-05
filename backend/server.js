@@ -19,10 +19,6 @@ import {
 } from "./middleware/AdminMagicToken.js";
 const app = express();
 
-const magic = buildAdminMagicRouter();
-app.use("/api/admin/auth", magic.router);
-app.use("/api/admin", authAdminMagic(magic.config), adminRoutes);
-
 /* ────────────── SECURITY & MIDDLEWARE ────────────── */
 app.set("trust proxy", 1);
 app.use(helmet());
