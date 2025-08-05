@@ -518,6 +518,7 @@
       clearAllInvalid();
       if (!validateDraftMin()) return;
 
+      // build form data without file inputs
       const formData = new FormData(grantForm);
       document.querySelectorAll('input[type="file"]').forEach((input) => {
         if (formData.has(input.name)) formData.delete(input.name);
@@ -529,41 +530,42 @@
       if (existingToken) formData.append("token", existingToken);
 
       try {
+        // save draft
         const resp = await fetch(`${API_BASE}/save-draft`, {
           method: "POST",
           body: formData,
         });
         if (!resp.ok) throw new Error(`save-draft ${resp.status}`);
         const json = await resp.json();
-        const tokenFromResp = json.token || existingToken || "";
+        const tokenFromResp = json.token || existingToken;
         if (json.token) localStorage.setItem("draftToken", json.token);
 
+        // send resume link once per token
         const emailEl = elFor("parent1.email");
         const email = emailEl?.value?.trim();
         const token = tokenFromResp;
-        const sentKey = token ? `resumeSent:${token}` : null;
-
+        const sentKey = `resumeSent:${token}`;
         if (
           email &&
           isEmail(email) &&
           token &&
-          (!sentKey || !localStorage.getItem(sentKey))
+          !localStorage.getItem(sentKey)
         ) {
-          try {
-            const r = await fetch(`${API_BASE}/resume/send-link`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ token, email }),
-            });
-            if (r.ok && sentKey) localStorage.setItem(sentKey, "1");
-          } catch (e) {
-            console.error("send-link error:", e);
+          const linkResp = await fetch(`${API_BASE}/resume/send-link`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ token, email }),
+          });
+          if (!linkResp.ok) {
+            console.error("resume send-link failed", await linkResp.text());
+          } else {
+            localStorage.setItem(sentKey, "1");
           }
         }
 
         showToast("Draft saved.");
       } catch (err) {
-        console.error(err);
+        console.error("saveStep error", err);
         showToast("Error saving draft.");
       }
     };
