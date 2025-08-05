@@ -13,7 +13,15 @@ import formRoutes from "./routes/form.js";
 import adminRoutes from "./routes/admin.js";
 import resumeRoutes from "./routes/resume.js";
 
+import {
+  buildAdminMagicRouter,
+  authAdminMagic,
+} from "./middleware/AdminMagicToken.js";
 const app = express();
+
+const magic = buildAdminMagicRouter();
+app.use("/api/admin/auth", magic.router);
+app.use("/api/admin", authAdminMagic(magic.config), adminRoutes);
 
 /* ────────────── SECURITY & MIDDLEWARE ────────────── */
 app.set("trust proxy", 1);
