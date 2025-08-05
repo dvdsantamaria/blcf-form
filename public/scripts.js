@@ -620,8 +620,35 @@
     setTimeout(() => location.replace("/"), 500);
   };
 
-  /* -------------------- Initial render -------------------- */
-  document.addEventListener("DOMContentLoaded", () => {
-    if (!isReader) showStep(currentStep);
-  });
-})();
+/* -------------------- Initial render -------------------- */
+document.addEventListener("DOMContentLoaded", async () => {
+  if (isReader) return;
+  // if we just resumed, fetch the draft
+  const params = new URLSearchParams(location.search);
+  if (params.get("resumed")) {
+    try {
+      const res = await fetch(`${API_BASE}/resume/get-draft`, {
+        method: "GET",
+        credentials: "include"
+      });
+      if (res.ok) {
+        const data = await res.json();
+        // populate each field
+        Object.entries(data).forEach(([name, value]) => {
+          const input = elFor(name);
+          if (!input) return;
+          if (input.type === "checkbox") {
+            input.checked = Boolean(value);
+          } else {
+            input.value = value ?? "";
+          }
+        });
+        // restore step if present
+        currentStep = data.step ?? 0;
+      }
+    } catch (e) {
+      console.error("Error loading draft:", e);
+    }
+  }
+  showStep(currentStep);
+});
