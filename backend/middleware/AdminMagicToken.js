@@ -86,7 +86,7 @@ function makeConfig(overrides = {}) {
     ),
     uiBaseUrl: overrides.uiBaseUrl || process.env.ADMIN_UI_BASE_URL || "",
     fromEmail:
-      overrides.fromEmail || process.env.SES_FROM || "no-reply@example.com", 
+      overrides.fromEmail || process.env.SES_FROM || "no-reply@example.com",
     mailer: overrides.mailer || process.env.ADMIN_MAILER || "console",
     resendKey: overrides.resendKey || process.env.RESEND_API_KEY || "",
     brandName: overrides.brandName || process.env.ADMIN_BRAND || "Admin Access",
@@ -131,46 +131,46 @@ function verifySessionToken(token, cfg) {
    Email delivery (pluggable)
    ========================= */
 
-   async function sendMagicMail({ to, link, cfg }) {
-    if (cfg.mailer === "resend") {
-      const RESEND_KEY = cfg.resendKey || process.env.RESEND_API_KEY;
-      if (!RESEND_KEY) throw new Error("Missing Resend API key");
-  
-      const payload = {
-        from: cfg.fromEmail, // Esto sale de SES_FROM
-        to: [to],
-        subject: `${cfg.brandName} magic link`,
-        html: `
+async function sendMagicMail({ to, link, cfg }) {
+  if (cfg.mailer === "resend") {
+    const RESEND_KEY = cfg.resendKey || process.env.RESEND_API_KEY;
+    if (!RESEND_KEY) throw new Error("Missing Resend API key");
+
+    const payload = {
+      from: cfg.fromEmail, // Esto sale de SES_FROM
+      to: [to],
+      subject: `${cfg.brandName} magic link`,
+      html: `
           <p>Use this link to access ${cfg.brandName}:</p>
           <p><a href="${link}">${link}</a></p>
           <p>This link expires in ${cfg.tokenTtlMinutes} minutes.</p>
         `,
-        text: `Use this link to access ${cfg.brandName}: ${link}\nThis link expires in ${cfg.tokenTtlMinutes} minutes.`,
-      };
-  
-      const res = await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${RESEND_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      });
-  
-      if (!res.ok) {
-        const err = await res.text();
-        throw new Error("Resend API error: " + err);
-      }
-      return;
+      text: `Use this link to access ${cfg.brandName}: ${link}\nThis link expires in ${cfg.tokenTtlMinutes} minutes.`,
+    };
+
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${RESEND_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error("Resend API error: " + err);
     }
-  
-    // Console fallback (dev)
-    console.log(`[AdminMagic] Magic link for ${to}: ${link}`);
+    return;
   }
 
   // Console fallback (dev)
   console.log(`[AdminMagic] Magic link for ${to}: ${link}`);
 }
+
+// Console fallback (dev)
+console.log(`[AdminMagic] Magic link for ${to}: ${link}`);
+
 /* =========================
    Rate limit (simple in-memory)
    ========================= */
