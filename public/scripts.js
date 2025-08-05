@@ -621,7 +621,33 @@
   };
 
   /* -------------------- Initial render -------------------- */
-  document.addEventListener("DOMContentLoaded", () => {
-    if (!isReader) showStep(currentStep);
+  document.addEventListener("DOMContentLoaded", async () => {
+    if (isReader) return;
+    // if we just resumed, fetch the draft (cookie gets sent automatically)
+    const params = new URLSearchParams(location.search);
+    if (params.get("resumed")) {
+      try {
+        const res = await fetch(`${API_BASE}/resume/get-draft`, {
+          method: "GET",
+          credentials: "include",
+        });
+        if (res.ok) {
+          const data = await res.json();
+          Object.entries(data).forEach(([name, value]) => {
+            const input = elFor(name);
+            if (!input) return;
+            if (input.type === "checkbox") {
+              input.checked = Boolean(value);
+            } else {
+              input.value = value ?? "";
+            }
+          });
+          if (typeof data.step === "number") currentStep = data.step;
+        }
+      } catch (e) {
+        console.error("Error loading draft:", e);
+      }
+    }
+    showStep(currentStep);
   });
 })();
