@@ -1,11 +1,11 @@
 // backend/controllers/resumeController.js
 import "dotenv/config";
 import crypto from "crypto";
-import fetch from "node-fetch";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 
 import ResumeToken from "../models/ResumeToken.js";
 import FormDraft from "../models/FormDraft.js";
+import { sendHtmlEmail } from "../utils/mailer.js"; // use Resend SDK util
 
 /* ---------- AWS S3 ---------- */
 const s3 = new S3Client({
@@ -18,7 +18,7 @@ const s3 = new S3Client({
     : undefined,
 });
 
-/* ---------- Utilidades ---------- */
+/* ---------- Utils ---------- */
 function genToken(len = 24) {
   return crypto.randomBytes(len).toString("base64url");
 }
@@ -31,7 +31,7 @@ async function streamToString(stream) {
   return Buffer.concat(chunks).toString("utf-8");
 }
 
-/* ---------- Constantes ---------- */
+/* ---------- Const ---------- */
 const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || "").replace(/\/$/, "");
 const BACKEND_BASE_URL = (process.env.BACKEND_BASE_URL || "").replace(
   /\/$/,
@@ -39,55 +39,6 @@ const BACKEND_BASE_URL = (process.env.BACKEND_BASE_URL || "").replace(
 );
 const S3_BUCKET =
   process.env.S3_BUCKET || process.env.AWS_S3_BUCKET || process.env.BUCKET_NAME;
-
-/* ========================
-   EMAIL via Resend
-   ======================== */
-async function sendResendEmail(to, subject, text) {
-  try {
-    const RESEND_KEY = process.env.RESEND_API_KEY;
-    const FROM =
-      process.env.RESEND_FROM || "no-reply@grants.beyondlimitscf.org.au";
-
-    if (!RESEND_KEY) {
-      console.error("[Resend] RESEND_API_KEY not set");
-      return { ok: false, code: "NO_API_KEY" };
-    }
-    if (!isEmail(to)) {
-      console.error("[Resend] bad recipient:", to);
-      return { ok: false, code: "BAD_TO" };
-    }
-
-    const payload = {
-      from: FROM,
-      to: [to],
-      subject,
-      text,
-    };
-
-    const res = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${RESEND_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    });
-
-    if (!res.ok) {
-      const err = await res.text();
-      console.error("[Resend] error", err);
-      return { ok: false, code: "RESEND_ERR", message: err };
-    }
-
-    const out = await res.json();
-    console.log("[Resend] sent", { to, id: out?.id });
-    return { ok: true, id: out?.id };
-  } catch (e) {
-    console.error("[Resend] exception", e);
-    return { ok: false, code: "EXCEPTION", message: e?.message || String(e) };
-  }
-}
 
 /* ========================
    CONTROLLERS
@@ -106,6 +57,7 @@ export async function sendResumeLink(req, res) {
     if (!draft)
       return res.status(404).json({ ok: false, error: "Draft not found" });
 
+    // Create one time resume token
     const rt = genToken(24);
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
     await ResumeToken.create({
@@ -115,27 +67,45 @@ export async function sendResumeLink(req, res) {
       expiresAt,
     });
 
-    const exchangeUrl = `${
-      BACKEND_BASE_URL || PUBLIC_BASE_URL
-    }/api/resume/exchange?rt=${encodeURIComponent(rt)}`;
+    // Link that exchanges rt for cookie and redirects to UI
+    const base = BACKEND_BASE_URL || PUBLIC_BASE_URL || "";
+    const exchangeUrl = `${base}/api/resume/exchange?rt=${encodeURIComponent(
+      rt
+    )}`;
 
-    const mail = await sendResendEmail(
-      email,
-      "Resume your application",
-      `Hello,
+    // Send email via Resend SDK (through utils/mailer.js)
+    const subject = "Resume your application";
+    const text = `Hello,
 
 Use this secure link (valid 24 h) to resume your application:
 
 ${exchangeUrl}
 
-If you didn't request this, please ignore this email.`
-    );
+If you did not request this, please ignore this email.`;
 
+    const html = `
+      <p>Hello,</p>
+      <p>Use this secure link (valid 24 h) to resume your application:</p>
+      <p><a href="${exchangeUrl}">${exchangeUrl}</a></p>
+      <p>If you did not request this, please ignore this email.</p>
+    `;
+
+    const mail = await sendHtmlEmail({
+      to: email,
+      subject,
+      html,
+      text,
+      replyTo: process.env.REPLY_TO || undefined,
+    });
+
+    // Persist last email status for debugging
     await FormDraft.findOneAndUpdate(
       { token },
       { $set: { email, lastActivityAt: new Date(), lastEmailStatus: mail } },
       { upsert: true }
     );
+
+    console.log("[resume] token sent", { email, ok: mail?.ok, id: mail?.id });
 
     return res.json({ ok: true, mail, exchangeUrl });
   } catch (err) {

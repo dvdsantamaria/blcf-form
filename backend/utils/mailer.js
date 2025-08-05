@@ -36,11 +36,15 @@ function dump(obj) {
   }
 }
 
+/**
+ * Send HTML email using Resend SDK.
+ * Accepts optional text and replyTo.
+ */
 export async function sendHtmlEmail({ to, subject, html, text, replyTo }) {
   try {
     const FROM =
       process.env.RESEND_FROM ||
-      process.env.SES_FROM || // fallback (no recomendado si el dominio de SES no está verificado en Resend)
+      process.env.SES_FROM ||
       "onboarding@resend.dev";
 
     if (!resend) {
@@ -48,7 +52,7 @@ export async function sendHtmlEmail({ to, subject, html, text, replyTo }) {
       return { ok: false, skipped: true };
     }
     if (!to || !FROM) {
-      console.warn("[Resend] Skipped (missing to/from)", { to, FROM });
+      console.warn("[Resend] Skipped (missing to or from)", { to, FROM });
       return { ok: false, skipped: true };
     }
 
@@ -57,6 +61,7 @@ export async function sendHtmlEmail({ to, subject, html, text, replyTo }) {
       to,
       subject,
       html,
+      ...(text ? { text } : {}), // include plain text when provided
       ...(replyTo ? { reply_to: replyTo } : {}),
     });
 
