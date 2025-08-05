@@ -1,264 +1,198 @@
-// public/scripts.js
+// public/scripts.js (refactor Aug-2025)
+// All logic in one IIFE. Comments concise, English, no fancy punctuation.
 
-const API_BASE = "/api";
-const isReader = new URLSearchParams(location.search).get("mode") === "reader";
+(() => {
+  "use strict";
 
-let currentStep = 0;
-const steps = document.querySelectorAll(".step");
-const submitBtn = document.getElementById("submitBtn");
-const saveBtn = document.getElementById("saveDraftBtn");
-const grantForm = document.getElementById("grantForm");
+  /* -------------------- Globals -------------------- */
+  const API_BASE = "/api";
+  const isReader =
+    new URLSearchParams(location.search).get("mode") === "reader";
 
-// -------------------- OPCIONALES (los ÚNICOS 6) --------------------
-const OPTIONAL_FIELDS = new Set([
-  // 1) If NO, why not?
-  "ndis.notEligibleReason",
-  // 2) If YES but more support is needed, why?
-  "ndis.moreSupportWhy",
-  // 3) Parent/Carer 2 (completo):
-  "parent2.relationshipToChild",
-  "parent2.firstName",
-  "parent2.lastName",
-  "parent2.mobile",
-  "parent2.email",
-  "parent2.employmentStatus",
-  "parent2.occupation",
-  "parent2.centrelinkPayments",
-  "parent2.livingArrangements",
-  "parent2.relationshipToParent1",
-  // 4) Ages of dependents
-  "dependents.ages",
-  // 5) How many with disability?
-  "dependents.withDisabilityCount",
-  // 6) Details of other conditions/disabilities
-  "otherConditions.details",
-]);
+  let currentStep = 0;
+  const steps = document.querySelectorAll(".step");
+  const submitBtn = document.getElementById("submitBtn");
+  const saveBtn = document.getElementById("saveDraftBtn");
+  const grantForm = document.getElementById("grantForm");
 
-// -------------------- REQUERIDOS POR PASO --------------------
-// Paso 0: Parent/Carer 1 + How did you hear about us?
-const STEP_REQUIRED = {
-  0: [
-    "referral.source",
-    "parent1.relationshipToChild",
-    // "parent1.financialResponsible"  // <- es checkbox SI/NO, no puede ser "requerido" forzando a chequear; se captura como dato si aplica
+  /* -------------------- Optional fields -------------------- */
+  const OPTIONAL_FIELDS = new Set([
+    "ndis.notEligibleReason",
+    "ndis.moreSupportWhy",
+    // Parent two full block
+    "parent2.relationshipToChild",
+    "parent2.firstName",
+    "parent2.lastName",
+    "parent2.mobile",
+    "parent2.email",
+    "parent2.employmentStatus",
+    "parent2.occupation",
+    "parent2.centrelinkPayments",
+    "parent2.livingArrangements",
+    "parent2.relationshipToParent1",
+    "dependents.ages",
+    "dependents.withDisabilityCount",
+    "otherConditions.details",
+  ]);
+
+  /* -------------------- Required fields by step -------------------- */
+  const STEP_REQUIRED = {
+    0: [
+      "referral.source",
+      "parent1.relationshipToChild",
+      "parent1.firstName",
+      "parent1.lastName",
+      "parent1.mobile",
+      "parent1.email",
+      "parent1.employmentStatus",
+      "parent1.occupation",
+      "parent1.centrelinkPayments",
+      "parent1.livingArrangements",
+    ],
+    1: [
+      "child.firstName",
+      "child.lastName",
+      "child.dob",
+      "child.age",
+      "child.gender",
+      "child.phone",
+      "child.streetNumber",
+      "child.suburb",
+      "child.state",
+      "child.postcode",
+      "child.mainLanguage",
+      "child.diagnosis",
+      "child.impactDailyLife",
+      "child.currentSupports",
+      "child.impactFamily",
+      "child.currentTherapies",
+    ],
+    2: [
+      "ndis.participantEligible",
+      "docs.ndisCommunication",
+      "docs.supportLetterHealthProfessional",
+      "therapy.toBeFunded",
+      "therapy.frequencyOrEquipment",
+      "therapy.goals",
+      "therapy.noGrantImpact",
+      "docs.diagnosisLetter",
+    ],
+    3: ["household.sameHousehold", "dependents.countUnder18"],
+    4: ["consent.terms", "consent.truth", "consent.report", "consent.media"],
+  };
+
+  const DRAFT_MIN_REQUIRED = [
     "parent1.firstName",
-    "parent1.lastName",
     "parent1.mobile",
     "parent1.email",
-    "parent1.employmentStatus",
-    "parent1.occupation",
-    "parent1.centrelinkPayments",
-    "parent1.livingArrangements",
-  ],
-  // Paso 1: Child's Details
-  1: [
-    "child.firstName",
-    "child.lastName",
-    "child.dob",
-    "child.age",
-    "child.gender",
-    "child.phone", // <- ahora requerido
-    "child.streetNumber",
-    "child.suburb",
-    "child.state",
-    "child.postcode",
-    // Los dos siguientes son checkboxes “informativos”, no tiene sentido forzar a “true”:
-    // "child.refugee",
-    // "child.indigenous",
-    "child.mainLanguage",
-    "child.diagnosis",
-    "child.impactDailyLife",
-    "child.currentSupports",
-    "child.impactFamily",
-    "child.currentTherapies",
-  ],
-  // Paso 2: NDIS and Therapy
-  2: [
-    "ndis.participantEligible",
-    // opcional: "ndis.notEligibleReason",
-    "docs.ndisCommunication", // archivo requerido
-    // opcional: "ndis.moreSupportWhy",
-    "docs.supportLetterHealthProfessional", // archivo requerido
-    "therapy.toBeFunded",
-    "therapy.frequencyOrEquipment",
-    "therapy.goals",
-    "therapy.noGrantImpact",
-    "docs.diagnosisLetter", // archivo requerido
-    // "docs.additionalLetterOptional",
-  ],
-  // Paso 3: Household & Additional Details (Parent/Carer 2 todo opcional)
-  3: [
-    "household.sameHousehold",
-    "dependents.countUnder18",
-    // opcionales: ages / withDisabilityCount / otherConditions.details
-  ],
-  // Paso 4: Consent (mailUpdates es opcional)
-  4: ["consent.terms", "consent.truth", "consent.report", "consent.media"],
-};
+  ];
 
-// Requisitos mínimos para guardar borrador
-const DRAFT_MIN_REQUIRED = [
-  "parent1.firstName",
-  "parent1.mobile",
-  "parent1.email",
-];
+  /* -------------------- Helpers -------------------- */
+  const isEmail = (v) => !!v && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
 
-// -------------------- Utils --------------------
-function isEmail(v) {
-  return !!v && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
-}
-
-function showToast(msg) {
-  let t = document.getElementById("toast");
-  if (!t) {
-    t = document.createElement("div");
-    t.id = "toast";
-    t.setAttribute("role", "status");
-    t.setAttribute("aria-live", "polite");
-    Object.assign(t.style, {
-      position: "fixed",
-      bottom: "20px",
-      left: "50%",
-      transform: "translateX(-50%)",
-      background: "#222",
-      color: "#fff",
-      padding: "10px 16px",
-      borderRadius: "10px",
-      fontSize: "14px",
-      boxShadow: "0 6px 18px rgba(0,0,0,.25)",
-      zIndex: 9999,
-      opacity: 0,
-      transition: "opacity .25s",
-    });
-    document.body.appendChild(t);
-  }
-  t.textContent = msg;
-  t.style.opacity = "1";
-  clearTimeout(t._h);
-  t._h = setTimeout(() => (t.style.opacity = "0"), 3000);
-}
-
-function clearAllInvalid() {
-  document.querySelectorAll(".is-invalid").forEach((el) => {
-    el.classList.remove("is-invalid");
-    el.removeAttribute("aria-invalid");
-  });
-}
-function clearInvalid(container) {
-  container.querySelectorAll(".is-invalid").forEach((el) => {
-    el.classList.remove("is-invalid");
-    el.removeAttribute("aria-invalid");
-  });
-}
-function markInvalid(el) {
-  el.classList.add("is-invalid");
-  el.setAttribute("aria-invalid", "true");
-  const remove = () => el.classList.remove("is-invalid");
-  el.addEventListener("input", remove, { once: true });
-  el.addEventListener("change", remove, { once: true });
-}
-
-function readableName(name) {
-  const map = {
-    "referral.source": "How did you hear about us",
-
-    // Parent/Carer 1
-    "parent1.relationshipToChild": "Relationship to the child",
-    "parent1.financialResponsible": "Financially responsible for the child",
-    "parent1.firstName": "Parent/Carer 1 first name",
-    "parent1.lastName": "Parent/Carer 1 last name",
-    "parent1.mobile": "Parent/Carer 1 mobile",
-    "parent1.email": "Parent/Carer 1 email",
-    "parent1.employmentStatus": "Employment status",
-    "parent1.occupation": "Occupation",
-    "parent1.centrelinkPayments": "Receiving Centrelink payments",
-    "parent1.livingArrangements": "Current living arrangements",
-
-    // Child
-    "child.firstName": "Child first name",
-    "child.lastName": "Child last name",
-    "child.dob": "Date of birth",
-    "child.age": "Age",
-    "child.gender": "Gender",
-    "child.phone": "Child phone number",
-    "child.streetNumber": "Street and number",
-    "child.suburb": "Suburb",
-    "child.state": "State",
-    "child.postcode": "Postcode",
-    "child.refugee": "Is the child a refugee?",
-    "child.indigenous": "Aboriginal or Torres Strait Islander heritage",
-    "child.mainLanguage": "Main language spoken at home",
-    "child.diagnosis": "Diagnosis or condition",
-    "child.impactDailyLife": "Impact on daily life",
-    "child.currentSupports": "Current supports",
-    "child.impactFamily": "Impact on family",
-    "child.currentTherapies": "Current therapies",
-
-    // NDIS & Therapy
-    "ndis.participantEligible": "NDIS participant or eligible",
-    "ndis.notEligibleReason": "If NO, why not?",
-    "docs.ndisCommunication": "NDIS communication (file)",
-    "ndis.moreSupportWhy": "If YES but more support is needed, why?",
-    "docs.supportLetterHealthProfessional":
-      "Support letter (health professional) (file)",
-    "therapy.toBeFunded": "Therapy/therapies to be funded",
-    "therapy.frequencyOrEquipment": "Therapy frequency or equipment required",
-    "therapy.goals": "Child's therapy goals",
-    "therapy.noGrantImpact": "Impact if grant is not received",
-    "docs.diagnosisLetter": "Diagnosis letter (file)",
-    "docs.additionalLetterOptional": "Additional letter (file)",
-
-    // Household & additional
-    "household.sameHousehold":
-      "Do both parents/carers live in the same household?",
-    "dependents.countUnder18": "Number of dependents under 18",
-    "dependents.ages": "Ages of dependents",
-    "dependents.withDisabilityCount": "How many with disability?",
-    "otherConditions.details": "Details of other conditions/disabilities",
-
-    // Consent
-    "consent.mailUpdates": "Receive news updates",
-    "consent.terms": "I agree to the privacy policy and terms",
-    "consent.truth": "I declare the information is correct",
-    "consent.report": "I agree to complete the final survey/report",
-    "consent.media": "I give permission for image use",
-  };
-  return map[name] || name;
-}
-
-function isCheckbox(name) {
-  const el = document.querySelector(`[name="${name}"]`);
-  return el && el.type === "checkbox";
-}
-function isFile(name) {
-  const el = document.querySelector(`[name="${name}"]`);
-  return el && el.type === "file";
-}
-function elFor(name) {
-  return document.querySelector(`[name="${name}"]`);
-}
-
-// Añadir indicador visual (required / optional)
-(function decorateLabels() {
-  // Primero, marcar opcionales
-  OPTIONAL_FIELDS.forEach((name) => {
-    const el = elFor(name);
-    if (!el) return;
-    let label =
-      el.previousElementSibling?.tagName === "LABEL"
-        ? el.previousElementSibling
-        : null;
-    if (!label && el.id)
-      label = document.querySelector(`label[for="${el.id}"]`);
-    if (label && !/\(optional\)/i.test(label.textContent)) {
-      label.innerHTML = `${label.innerHTML} <span class="text-muted">(optional)</span>`;
+  function showToast(msg) {
+    let node = document.getElementById("toast");
+    if (!node) {
+      node = document.createElement("div");
+      node.id = "toast";
+      node.setAttribute("role", "status");
+      node.setAttribute("aria-live", "polite");
+      Object.assign(node.style, {
+        position: "fixed",
+        bottom: "20px",
+        left: "50%",
+        transform: "translateX(-50%)",
+        background: "#222",
+        color: "#fff",
+        padding: "10px 16px",
+        borderRadius: "10px",
+        fontSize: "14px",
+        boxShadow: "0 6px 18px rgba(0,0,0,.25)",
+        zIndex: 9999,
+        opacity: 0,
+        transition: "opacity .25s",
+      });
+      document.body.appendChild(node);
     }
-  });
+    node.textContent = msg;
+    node.style.opacity = "1";
+    clearTimeout(node._h);
+    node._h = setTimeout(() => (node.style.opacity = "0"), 3000);
+  }
 
-  // Luego, marcar requeridos por paso con asterisco
-  Object.keys(STEP_REQUIRED).forEach((k) => {
-    STEP_REQUIRED[k].forEach((name) => {
-      if (OPTIONAL_FIELDS.has(name)) return;
+  const clearAllInvalid = () =>
+    document.querySelectorAll(".is-invalid").forEach((el) => {
+      el.classList.remove("is-invalid");
+      el.removeAttribute("aria-invalid");
+    });
+
+  const clearInvalid = (container) =>
+    container.querySelectorAll(".is-invalid").forEach((el) => {
+      el.classList.remove("is-invalid");
+      el.removeAttribute("aria-invalid");
+    });
+
+  const markInvalid = (el) => {
+    el.classList.add("is-invalid");
+    el.setAttribute("aria-invalid", "true");
+    const remove = () => el.classList.remove("is-invalid");
+    el.addEventListener("input", remove, { once: true });
+    el.addEventListener("change", remove, { once: true });
+  };
+
+  const readableName = (name) => {
+    const map = {
+      "referral.source": "How did you hear about us",
+      // Parent one
+      "parent1.relationshipToChild": "Relationship to the child",
+      "parent1.firstName": "Parent one first name",
+      "parent1.lastName": "Parent one last name",
+      "parent1.mobile": "Parent one mobile",
+      "parent1.email": "Parent one email",
+      "parent1.employmentStatus": "Employment status",
+      "parent1.occupation": "Occupation",
+      "parent1.centrelinkPayments": "Centrelink payments",
+      "parent1.livingArrangements": "Living arrangements",
+      // Child block
+      "child.firstName": "Child first name",
+      "child.lastName": "Child last name",
+      "child.dob": "Date of birth",
+      "child.age": "Age",
+      "child.gender": "Gender",
+      "child.phone": "Child phone",
+      "child.streetNumber": "Street and number",
+      "child.suburb": "Suburb",
+      "child.state": "State",
+      "child.postcode": "Postcode",
+      "child.mainLanguage": "Main language",
+      "child.diagnosis": "Diagnosis",
+      "child.impactDailyLife": "Impact daily life",
+      "child.currentSupports": "Current supports",
+      "child.impactFamily": "Impact family",
+      "child.currentTherapies": "Current therapies",
+      // NDIS
+      "ndis.participantEligible": "NDIS participant or eligible",
+      "docs.ndisCommunication": "NDIS communication file",
+      "docs.supportLetterHealthProfessional": "Support letter file",
+      "therapy.toBeFunded": "Therapies to be funded",
+      "therapy.frequencyOrEquipment": "Frequency or equipment",
+      "therapy.goals": "Therapy goals",
+      "therapy.noGrantImpact": "Impact if no grant",
+      "docs.diagnosisLetter": "Diagnosis letter file",
+      // Consent
+      "consent.terms": "Privacy and terms",
+      "consent.truth": "Information correct",
+      "consent.report": "Final report",
+      "consent.media": "Image permission",
+    };
+    return map[name] || name;
+  };
+
+  /* -------------------- Label decoration -------------------- */
+  const elFor = (name) => document.querySelector(`[name="${name}"]`);
+
+  (function decorateLabels() {
+    OPTIONAL_FIELDS.forEach((name) => {
       const el = elFor(name);
       if (!el) return;
       let label =
@@ -267,263 +201,115 @@ function elFor(name) {
           : null;
       if (!label && el.id)
         label = document.querySelector(`label[for="${el.id}"]`);
-      if (label && !/\*\s*$/.test(label.textContent)) {
-        label.innerHTML = `${label.innerHTML} <span class="text-danger">*</span>`;
-      }
+      if (label && !/(optional)/i.test(label.textContent))
+        label.innerHTML = `${label.innerHTML} <span class="text-muted">(optional)</span>`;
     });
-  });
-})();
 
-// -------------------- Modo reader --------------------
-if (isReader) {
-  if (submitBtn) submitBtn.style.display = "none";
-  if (saveBtn) saveBtn.style.display = "none";
-  document.querySelectorAll("input, textarea, select").forEach((el) => {
-    el.disabled = true;
-  });
-  showAllReaderMode();
-}
+    Object.keys(STEP_REQUIRED).forEach((k) => {
+      STEP_REQUIRED[k].forEach((name) => {
+        if (OPTIONAL_FIELDS.has(name)) return;
+        const el = elFor(name);
+        if (!el) return;
+        let label =
+          el.previousElementSibling?.tagName === "LABEL"
+            ? el.previousElementSibling
+            : null;
+        if (!label && el.id)
+          label = document.querySelector(`label[for="${el.id}"]`);
+        if (label && !/\*\s*$/.test(label.textContent))
+          label.innerHTML = `${label.innerHTML} <span class="text-danger">*</span>`;
+      });
+    });
+  })();
 
-// -------------------- Age desde DOB --------------------
-function parseYMD(s) {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || "");
-  if (!m) return null;
-  const y = Number(m[1]),
-    mo = Number(m[2]) - 1,
-    d = Number(m[3]);
-  return new Date(y, mo, d);
-}
-function calcAgeYearsFromDate(d) {
-  if (!(d instanceof Date) || isNaN(d)) return "";
-  const today = new Date();
-  let years = today.getFullYear() - d.getFullYear();
-  const m = today.getMonth() - d.getMonth();
-  if (m < 0 || (m === 0 && today.getDate() < d.getDate())) years--;
-  return years >= 0 ? String(years) : "";
-}
-function ensureAgeFromDob() {
-  const dobEl = document.querySelector('[name="child.dob"]');
-  const ageEl = document.querySelector('[name="child.age"]');
-  if (!dobEl || !ageEl) return;
-  const years = calcAgeYearsFromDate(parseYMD(dobEl.value));
-  if (years !== "") {
+  /* -------------------- Age autofill -------------------- */
+  const parseYMD = (s) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || "");
+    if (!m) return null;
+    return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  };
+
+  const calcAge = (d) => {
+    if (!(d instanceof Date) || isNaN(d)) return "";
+    const t = new Date();
+    let y = t.getFullYear() - d.getFullYear();
+    const m = t.getMonth() - d.getMonth();
+    if (m < 0 || (m === 0 && t.getDate() < d.getDate())) y--;
+    return y >= 0 ? String(y) : "";
+  };
+
+  const ensureAgeFromDob = () => {
+    const dobEl = elFor("child.dob");
+    const ageEl = elFor("child.age");
+    if (!dobEl || !ageEl) return;
+    const years = calcAge(parseYMD(dobEl.value));
     ageEl.value = years;
     ageEl.placeholder = years;
-  } else {
-    ageEl.value = "";
-    ageEl.placeholder = "";
-  }
-}
-// Inicializa: hace readonly y bindea eventos
-(function wireAgeAutofill() {
-  const dobEl = document.querySelector('[name="child.dob"]');
-  const ageEl = document.querySelector('[name="child.age"]');
-  if (!dobEl || !ageEl) return;
-  ageEl.readOnly = true;
-  ["input", "change", "blur"].forEach((evt) =>
-    dobEl.addEventListener(evt, ensureAgeFromDob)
-  );
-  ensureAgeFromDob();
-})();
+  };
 
-// -------------------- Validación --------------------
-function validateStep(idx) {
-  ensureAgeFromDob();
-  const required = STEP_REQUIRED[idx] || [];
-  const container = steps[idx];
-  clearInvalid(container);
-
-  const missing = [];
-  let firstInvalid = null;
-
-  required.forEach((name) => {
-    if (OPTIONAL_FIELDS.has(name)) return;
-    const el = elFor(name);
-    if (!el) return;
-
-    if (isCheckbox(name)) {
-      const checked = el.checked;
-      if (!checked) {
-        missing.push(readableName(name));
-        markInvalid(el);
-        firstInvalid ||= el;
-      }
-      return;
-    }
-
-    if (isFile(name)) {
-      if (!el.dataset.s3key) {
-        missing.push(readableName(name));
-        markInvalid(el);
-        firstInvalid ||= el;
-      }
-      return;
-    }
-
-    if (name === "parent1.email") {
-      if (!isEmail((el.value || "").trim())) {
-        missing.push(readableName(name));
-        markInvalid(el);
-        firstInvalid ||= el;
-      }
-      return;
-    }
-
-    const val = (el.value || "").trim();
-    if (!val) {
-      missing.push(readableName(name));
-      markInvalid(el);
-      firstInvalid ||= el;
-    }
-  });
-
-  if (missing.length) {
-    showToast(`Please complete: ${missing.join(", ")}.`);
-    firstInvalid?.scrollIntoView({ behavior: "smooth", block: "center" });
-    firstInvalid?.focus();
-    return false;
-  }
-  return true;
-}
-
-function validateAllBeforeSubmit() {
-  for (let i = 0; i < steps.length - 1; i++) {
-    if (!validateStep(i)) {
-      currentStep = i;
-      showStep(currentStep);
-      return false;
-    }
-  }
-  return true;
-}
-
-// -------------------- Navegación --------------------
-function showStep(n) {
-  if (isReader) {
-    // En modo reader siempre mostramos todo; no cambies visibilidad por step
-    return;
-  }
-
-  steps.forEach((s, i) => s.classList.toggle("active", i === n));
-
-  const prevBtn = document.querySelector('button[onclick="nextStep(-1)"]');
-  const nextBtn = document.querySelector('button[onclick="nextStep(1)"]');
-
-  if (prevBtn)
-    prevBtn.style.display =
-      n === 0 || n === steps.length - 1 ? "none" : "inline-block";
-  if (nextBtn)
-    nextBtn.style.display = n >= steps.length - 2 ? "none" : "inline-block";
-
-  if (submitBtn)
-    submitBtn.style.display =
-      n === steps.length - 2 && !isReader ? "inline-block" : "none";
-  if (saveBtn)
-    saveBtn.style.display =
-      n < steps.length - 2 && !isReader ? "inline-block" : "none";
-}
-
-function nextStep(n) {
-  if (!isReader && n === 1 && !validateStep(currentStep)) return;
-  currentStep += n;
-  if (currentStep >= 0 && currentStep < steps.length) showStep(currentStep);
-}
-showStep(currentStep);
-
-// Bloquear submit en reader
-if (grantForm) {
-  grantForm.addEventListener("submit", (e) => {
-    if (isReader) {
-      e.preventDefault();
-      showToast("Viewing only.");
-    }
-  });
-}
-
-// -------------------- Carga de datos en modo reader --------------------
-(async function loadForReader() {
-  try {
-    if (!isReader) return;
-
-    const qs = new URLSearchParams(location.search);
-    const token = qs.get("token");
-    if (!token) return;
-
-    // ✅ Fixed: correcto endpoint de lectura para modo lector
-    const res = await fetch(`/api/form/view?token=${encodeURIComponent(token)}`);
-    if (!res.ok) return;
-
-    const payload = await res.json();
-    const data = payload?.data || {};
-
-    Object.entries(data).forEach(([name, value]) => {
-      const input = elFor(name);
-      if (!input) return;
-
-      if (input.type === "checkbox") {
-        input.checked = !!value;
-      } else if (input.type === "radio") {
-        const radio = document.querySelector(`input[name="${name}"][value="${value}"]`);
-        if (radio) radio.checked = true;
-      } else {
-        input.value = value ?? "";
-      }
-    });
-  } catch (err) {
-    console.error("Error loading reader form:", err);
-  }
-})();
-
-    // Recalcular Age si vino DOB
-    ensureAgeFromDob();
-
-    if (typeof payload.step === "number") {
-      currentStep = Math.min(Math.max(0, payload.step), steps.length - 1);
-      showStep(currentStep);
-    }
-
-    showToast(
-      payload.type === "submitted" ? "Viewing submission." : "Viewing draft."
+  (function wireAgeAutofill() {
+    const dobEl = elFor("child.dob");
+    const ageEl = elFor("child.age");
+    if (!dobEl || !ageEl) return;
+    ageEl.readOnly = true;
+    ["input", "change", "blur"].forEach((evt) =>
+      dobEl.addEventListener(evt, ensureAgeFromDob)
     );
-  } catch (e) {
-    console.error("reader load error:", e);
-  }
-})();
+    ensureAgeFromDob();
+  })();
 
-// -------------------- Modo edición --------------------
-if (!isReader) {
-  async function ensureToken() {
-    let token = localStorage.getItem("draftToken");
-    if (token) return token;
-    const fd = new FormData();
-    fd.append("step", currentStep);
-    const res = await fetch(`${API_BASE}/save-draft`, {
-      method: "POST",
-      body: fd,
-    });
-    if (!res.ok) throw new Error(`save-draft ${res.status}`);
-    const j = await res.json();
-    token = j.token;
-    localStorage.setItem("draftToken", token);
-    return token;
+  /* -------------------- Validation -------------------- */
+  function isCheckbox(name) {
+    const el = elFor(name);
+    return el && el.type === "checkbox";
+  }
+  function isFile(name) {
+    const el = elFor(name);
+    return el && el.type === "file";
   }
 
-  function validateDraftMin() {
+  function validateStep(idx) {
+    ensureAgeFromDob();
+    const required = STEP_REQUIRED[idx] || [];
+    const container = steps[idx];
+    clearInvalid(container);
+
     const missing = [];
     let firstInvalid = null;
-    DRAFT_MIN_REQUIRED.forEach((name) => {
+
+    required.forEach((name) => {
+      if (OPTIONAL_FIELDS.has(name)) return;
       const el = elFor(name);
       if (!el) return;
-      let ok = (el.value || "").trim().length > 0;
-      if (name === "parent1.email") ok = isEmail((el.value || "").trim());
-      if (!ok) {
+
+      if (isCheckbox(name)) {
+        if (!el.checked) {
+          missing.push(readableName(name));
+          markInvalid(el);
+          firstInvalid ||= el;
+        }
+        return;
+      }
+
+      if (isFile(name)) {
+        if (!el.dataset.s3key) {
+          missing.push(readableName(name));
+          markInvalid(el);
+          firstInvalid ||= el;
+        }
+        return;
+      }
+
+      const val = (el.value || "").trim();
+      if (name === "parent1.email" ? !isEmail(val) : !val) {
         missing.push(readableName(name));
         markInvalid(el);
         firstInvalid ||= el;
       }
     });
+
     if (missing.length) {
-      showToast(`Please complete: ${missing.join(", ")} to save your draft.`);
+      showToast(`Please complete: ${missing.join(", ")}.`);
       firstInvalid?.scrollIntoView({ behavior: "smooth", block: "center" });
       firstInvalid?.focus();
       return false;
@@ -531,112 +317,259 @@ if (!isReader) {
     return true;
   }
 
-  // Upload de archivos (presigned URL)
-  document.querySelectorAll('input[type="file"]').forEach((input) => {
-    input.addEventListener("change", async () => {
-      const file = input.files[0];
-      // Si el usuario cambia el archivo, limpiar key previa hasta que suba
-      delete input.dataset.s3key;
-      if (!file) return;
-
-      const fieldName = input.name;
-      const ext = file.name.split(".").pop().toLowerCase();
-      const mimeMap = {
-        pdf: "application/pdf",
-        jpg: "image/jpeg",
-        jpeg: "image/jpeg",
-        png: "image/png",
-        webp: "image/webp",
-        heic: "image/heic",
-        heif: "image/heic",
-      };
-      const mime = file.type || mimeMap[ext] || "";
-      if (!mime) return showToast("Unsupported file type.");
-
-      try {
-        const token = await ensureToken();
-        const res = await fetch(
-          `${API_BASE}/generate-upload-url?field=${encodeURIComponent(
-            fieldName
-          )}&token=${encodeURIComponent(token)}&type=${encodeURIComponent(
-            mime
-          )}`
-        );
-        if (!res.ok) throw new Error("Failed to get signed URL");
-        const { url, key } = await res.json();
-        const up = await fetch(url, {
-          method: "PUT",
-          headers: { "Content-Type": mime },
-          body: file,
-        });
-        if (!up.ok) throw new Error("Upload failed");
-        input.dataset.s3key = key;
-        showToast("File uploaded.");
-      } catch (err) {
-        console.error(err);
-        showToast("Upload error.");
+  const validateAllBeforeSubmit = () => {
+    for (let i = 0; i < steps.length - 1; i++) {
+      if (!validateStep(i)) {
+        currentStep = i;
+        showStep(currentStep);
+        return false;
       }
-    });
-  });
-
-  // Guardado de borrador
-  window.saveStep = async function saveStep() {
-    clearAllInvalid();
-    if (!validateDraftMin()) return;
-
-    const formData = new FormData(grantForm);
-    document.querySelectorAll('input[type="file"]').forEach((input) => {
-      if (formData.has(input.name)) formData.delete(input.name);
-      if (input.dataset.s3key) formData.append(input.name, input.dataset.s3key);
-    });
-
-    formData.append("step", currentStep);
-    const existingToken = localStorage.getItem("draftToken");
-    if (existingToken) formData.append("token", existingToken);
-
-    try {
-      const resp = await fetch(`${API_BASE}/save-draft`, {
-        method: "POST",
-        body: formData,
-      });
-      if (!resp.ok) throw new Error(`save-draft ${resp.status}`);
-      const json = await resp.json();
-      const tokenFromResp = json.token || existingToken || "";
-      if (json.token) localStorage.setItem("draftToken", json.token);
-
-      const emailEl = elFor("parent1.email");
-      const email = emailEl?.value?.trim();
-      const token = tokenFromResp;
-      const sentKey = token ? `resumeSent:${token}` : null;
-
-      if (
-        email &&
-        isEmail(email) &&
-        token &&
-        (!sentKey || !localStorage.getItem(sentKey))
-      ) {
-        try {
-          const r = await fetch(`${API_BASE}/resume/send-link`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ token, email }),
-          });
-          if (r.ok && sentKey) localStorage.setItem(sentKey, "1");
-        } catch (e) {
-          console.error("send-link error:", e);
-        }
-      }
-
-      showToast("Draft saved.");
-    } catch (err) {
-      console.error(err);
-      showToast("Error saving draft.");
     }
+    return true;
   };
 
-  // Submit final
-  if (grantForm) {
-    grantForm.addEventListener("submit", async (e) => {
+  /* -------------------- Navigation -------------------- */
+  function showStep(n) {
+    if (isReader) return; // reader shows all
+
+    steps.forEach((s, i) => s.classList.toggle("active", i === n));
+
+    const prevBtn = document.querySelector('button[onclick="nextStep(-1)"]');
+    const nextBtn = document.querySelector('button[onclick="nextStep(1)"]');
+
+    if (prevBtn)
+      prevBtn.style.display =
+        n === 0 || n === steps.length - 1 ? "none" : "inline-block";
+    if (nextBtn)
+      nextBtn.style.display = n >= steps.length - 2 ? "none" : "inline-block";
+
+    if (submitBtn)
+      submitBtn.style.display =
+        n === steps.length - 2 ? "inline-block" : "none";
+    if (saveBtn)
+      saveBtn.style.display = n < steps.length - 2 ? "inline-block" : "none";
+  }
+
+  window.nextStep = function nextStep(dir) {
+    if (!isReader && dir === 1 && !validateStep(currentStep)) return;
+    currentStep += dir;
+    if (currentStep >= 0 && currentStep < steps.length) showStep(currentStep);
+  };
+
+  /* -------------------- Reader mode -------------------- */
+  function showAllReaderMode() {
+    steps.forEach((s) => s.classList.add("active"));
+    const prevBtn = document.querySelector('button[onclick="nextStep(-1)"]');
+    const nextBtn = document.querySelector('button[onclick="nextStep(1)"]');
+    if (prevBtn) prevBtn.style.display = "none";
+    if (nextBtn) nextBtn.style.display = "none";
+    if (submitBtn) submitBtn.style.display = "none";
+    if (saveBtn) saveBtn.style.display = "none";
+  }
+
+  if (isReader) {
+    if (submitBtn) submitBtn.style.display = "none";
+    if (saveBtn) saveBtn.style.display = "none";
+    document
+      .querySelectorAll("input, textarea, select")
+      .forEach((el) => (el.disabled = true));
+    showAllReaderMode();
+  }
+
+  /* -------------------- Form submit blocker in reader -------------------- */
+  grantForm?.addEventListener("submit", (e) => {
+    if (isReader) {
+      e.preventDefault();
+      showToast("Viewing only.");
+    }
+  });
+
+  /* -------------------- Load data for reader -------------------- */
+  (async function loadForReader() {
+    if (!isReader) return;
+    try {
+      const qs = new URLSearchParams(location.search);
+      const token = qs.get("token");
+      if (!token) return;
+
+      const res = await fetch(
+        `/api/form/view?token=${encodeURIComponent(token)}`
+      );
+      if (!res.ok) return;
+
+      const payload = await res.json();
+      const data = payload?.data || {};
+
+      Object.entries(data).forEach(([name, value]) => {
+        const input = elFor(name);
+        if (!input) return;
+        switch (input.type) {
+          case "checkbox":
+            input.checked = !!value;
+            break;
+          case "radio":
+            const radio = document.querySelector(
+              `input[name="${name}"][value="${value}"]`
+            );
+            if (radio) radio.checked = true;
+            break;
+          default:
+            input.value = value ?? "";
+        }
+      });
+
+      showToast(
+        payload.type === "submitted" ? "Viewing submission." : "Viewing draft."
+      );
+    } catch (err) {
+      console.error("Error loading reader form:", err);
+    }
+  })();
+
+  /* -------------------- Draft logic (edit mode) -------------------- */
+  if (!isReader) {
+    async function ensureToken() {
+      let token = localStorage.getItem("draftToken");
+      if (token) return token;
+      const fd = new FormData();
+      fd.append("step", currentStep);
+      const res = await fetch(`${API_BASE}/save-draft`, {
+        method: "POST",
+        body: fd,
+      });
+      if (!res.ok) throw new Error(`save-draft ${res.status}`);
+      token = (await res.json()).token;
+      localStorage.setItem("draftToken", token);
+      return token;
+    }
+
+    function validateDraftMin() {
+      const missing = [];
+      let firstInvalid = null;
+      DRAFT_MIN_REQUIRED.forEach((name) => {
+        const el = elFor(name);
+        if (!el) return;
+        const val = (el.value || "").trim();
+        const ok = name === "parent1.email" ? isEmail(val) : val.length > 0;
+        if (!ok) {
+          missing.push(readableName(name));
+          markInvalid(el);
+          firstInvalid ||= el;
+        }
+      });
+      if (missing.length) {
+        showToast(`Please complete: ${missing.join(", ")} to save your draft.`);
+        firstInvalid?.scrollIntoView({ behavior: "smooth", block: "center" });
+        firstInvalid?.focus();
+        return false;
+      }
+      return true;
+    }
+
+    // File upload handling
+    document.querySelectorAll('input[type="file"]').forEach((input) => {
+      input.addEventListener("change", async () => {
+        const file = input.files[0];
+        delete input.dataset.s3key;
+        if (!file) return;
+
+        const fieldName = input.name;
+        const ext = file.name.split(".").pop().toLowerCase();
+        const mimeMap = {
+          pdf: "application/pdf",
+          jpg: "image/jpeg",
+          jpeg: "image/jpeg",
+          png: "image/png",
+          webp: "image/webp",
+          heic: "image/heic",
+          heif: "image/heic",
+        };
+        const mime = file.type || mimeMap[ext] || "";
+        if (!mime) return showToast("Unsupported file type.");
+
+        try {
+          const token = await ensureToken();
+          const res = await fetch(
+            `${API_BASE}/generate-upload-url?field=${encodeURIComponent(
+              fieldName
+            )}&token=${encodeURIComponent(token)}&type=${encodeURIComponent(
+              mime
+            )}`
+          );
+          if (!res.ok) throw new Error("Signed URL failed");
+          const { url, key } = await res.json();
+          const up = await fetch(url, {
+            method: "PUT",
+            headers: { "Content-Type": mime },
+            body: file,
+          });
+          if (!up.ok) throw new Error("Upload failed");
+          input.dataset.s3key = key;
+          showToast("File uploaded.");
+        } catch (err) {
+          console.error(err);
+          showToast("Upload error.");
+        }
+      });
+    });
+
+    // Draft save
+    window.saveStep = async function saveStep() {
+      clearAllInvalid();
+      if (!validateDraftMin()) return;
+
+      const formData = new FormData(grantForm);
+      document.querySelectorAll('input[type="file"]').forEach((input) => {
+        if (formData.has(input.name)) formData.delete(input.name);
+        if (input.dataset.s3key)
+          formData.append(input.name, input.dataset.s3key);
+      });
+      formData.append("step", currentStep);
+      const existingToken = localStorage.getItem("draftToken");
+      if (existingToken) formData.append("token", existingToken);
+
+      try {
+        const resp = await fetch(`${API_BASE}/save-draft`, {
+          method: "POST",
+          body: formData,
+        });
+        if (!resp.ok) throw new Error(`save-draft ${resp.status}`);
+        const json = await resp.json();
+        const tokenFromResp = json.token || existingToken || "";
+        if (json.token) localStorage.setItem("draftToken", json.token);
+
+        const emailEl = elFor("parent1.email");
+        const email = emailEl?.value?.trim();
+        const token = tokenFromResp;
+        const sentKey = token ? `resumeSent:${token}` : null;
+
+        if (
+          email &&
+          isEmail(email) &&
+          token &&
+          (!sentKey || !localStorage.getItem(sentKey))
+        ) {
+          try {
+            const r = await fetch(`${API_BASE}/resume/send-link`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ token, email }),
+            });
+            if (r.ok && sentKey) localStorage.setItem(sentKey, "1");
+          } catch (e) {
+            console.error("send-link error:", e);
+          }
+        }
+
+        showToast("Draft saved.");
+      } catch (err) {
+        console.error(err);
+        showToast("Error saving draft.");
+      }
+    };
+
+    // Final submit
+    grantForm?.addEventListener("submit", async (e) => {
       e.preventDefault();
       if (!validateAllBeforeSubmit()) return;
 
@@ -646,7 +579,6 @@ if (!isReader) {
         if (input.dataset.s3key)
           formData.append(input.name, input.dataset.s3key);
       });
-
       const existingToken = localStorage.getItem("draftToken");
       if (existingToken) formData.append("token", existingToken);
 
@@ -655,54 +587,39 @@ if (!isReader) {
           method: "POST",
           body: formData,
         });
-        if (res.ok) {
-          localStorage.removeItem("draftToken");
-          Object.keys(localStorage)
-            .filter((k) => k.startsWith("resumeSent:"))
-            .forEach((k) => localStorage.removeItem(k));
-          currentStep = steps.length - 1; // Thank you
-          showStep(currentStep);
-          showToast("Submission received.");
-        } else {
-          console.error("Submit failed:", await res.text());
-          showToast("Submission failed.");
-        }
+        if (!res.ok) throw new Error("Submit failed");
+        localStorage.removeItem("draftToken");
+        Object.keys(localStorage)
+          .filter((k) => k.startsWith("resumeSent:"))
+          .forEach((k) => localStorage.removeItem(k));
+        currentStep = steps.length - 1; // thank you page
+        showStep(currentStep);
+        showToast("Submission received.");
       } catch (err) {
         console.error(err);
         showToast("Submission failed.");
       }
     });
+  } else {
+    // Reader stub
+    window.saveStep = () => {};
   }
-} else {
-  // En reader no se guarda
-  window.saveStep = function () {};
-}
 
-// -------------------- Navegación inicial --------------------
-showStep(currentStep);
+  /* -------------------- Dev helper -------------------- */
+  window.devClearResumeSession = async function () {
+    try {
+      await fetch(`${API_BASE}/resume/logout`, { method: "POST" });
+    } catch {}
+    localStorage.removeItem("draftToken");
+    Object.keys(localStorage)
+      .filter((k) => k.startsWith("resumeSent:"))
+      .forEach((k) => localStorage.removeItem(k));
+    showToast("Session cleared.");
+    setTimeout(() => location.replace("/"), 500);
+  };
 
-// Helper dev
-window.devClearResumeSession = async function () {
-  try {
-    await fetch(`${API_BASE}/resume/logout`, { method: "POST" });
-  } catch {}
-  localStorage.removeItem("draftToken");
-  Object.keys(localStorage)
-    .filter((k) => k.startsWith("resumeSent:"))
-    .forEach((k) => localStorage.removeItem(k));
-  showToast("Session cleared.");
-  setTimeout(() => location.replace("/"), 500);
-};
-
-function showAllReaderMode() {
-  // marcar todos los pasos como activos (se muestran)
-  steps.forEach((s) => s.classList.add("active"));
-
-  // ocultar navegación y acciones
-  const prevBtn = document.querySelector('button[onclick="nextStep(-1)"]');
-  const nextBtn = document.querySelector('button[onclick="nextStep(1)"]');
-  if (prevBtn) prevBtn.style.display = "none";
-  if (nextBtn) nextBtn.style.display = "none";
-  if (submitBtn) submitBtn.style.display = "none";
-  if (saveBtn) saveBtn.style.display = "none";
-}
+  /* -------------------- Initial render -------------------- */
+  document.addEventListener("DOMContentLoaded", () => {
+    if (!isReader) showStep(currentStep);
+  });
+})();
