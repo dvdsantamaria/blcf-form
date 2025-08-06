@@ -21,7 +21,7 @@ const s3 = new S3Client({
 });
 
 /* ──────────────── Helpers ──────────────── */
-async function listPrefix(Prefix, MaxKeys = 1_000) {
+async function listPrefix(Prefix, MaxKeys = 1_000, reqId) {
   if (!S3_BUCKET) return [];
 
   const out = [];
@@ -37,15 +37,28 @@ async function listPrefix(Prefix, MaxKeys = 1_000) {
           MaxKeys,
         })
       );
-      (res.Contents || []).forEach(({ Key, Size, LastModified }) =>
-        out.push({ key: Key, size: Size, lastModified: LastModified })
-      );
+      const batch = (res.Contents || []).map(({ Key, Size, LastModified }) => ({
+        key: Key,
+        size: Size,
+        lastModified: LastModified,
+      }));
+      out.push(...batch);
       ContinuationToken = res.IsTruncated
         ? res.NextContinuationToken
         : undefined;
+      console.log("[S3][list]", {
+        reqId,
+        prefix: Prefix,
+        batch: batch.length,
+        total: out.length,
+      });
     } while (ContinuationToken);
   } catch (err) {
-    console.error("listPrefix error:", err);
+    console.error("listPrefix error:", {
+      reqId,
+      prefix: Prefix,
+      error: err?.message || err,
+    });
   }
   return out;
 }
@@ -54,13 +67,14 @@ async function listPrefix(Prefix, MaxKeys = 1_000) {
 
 // GET /api/admin/submissions
 export async function listSubmissions(req, res) {
-  // Authorization: only allow whitelisted admins
+  const reqId = req.requestId || "-";
   const adminEmail = req.adminEmail;
   const allowed = (process.env.ADMIN_ALLOWED_EMAILS || "")
     .split(/[,;]\s*/)
     .map((s) => s.trim())
     .filter(Boolean);
   if (!adminEmail || !allowed.includes(adminEmail)) {
+    console.warn("[admin][listSubmissions][forbidden]", { reqId, adminEmail });
     return res.status(403).json({ ok: false, error: "Forbidden" });
   }
 
@@ -69,22 +83,27 @@ export async function listSubmissions(req, res) {
       .sort({ createdAt: -1 })
       .limit(500)
       .lean();
+    console.log("[admin][listSubmissions]", { reqId, count: items.length });
     res.json({ ok: true, items });
   } catch (err) {
-    console.error("listSubmissions error:", err);
+    console.error("listSubmissions error:", {
+      reqId,
+      error: err?.message || err,
+    });
     res.status(500).json({ ok: false, error: "Internal Server Error" });
   }
 }
 
 // GET /api/admin/submission/:token/manifest
 export async function getManifest(req, res) {
-  // Authorization
+  const reqId = req.requestId || "-";
   const adminEmail = req.adminEmail;
   const allowed = (process.env.ADMIN_ALLOWED_EMAILS || "")
     .split(/[,;]\s*/)
     .map((s) => s.trim())
     .filter(Boolean);
   if (!adminEmail || !allowed.includes(adminEmail)) {
+    console.warn("[admin][getManifest][forbidden]", { reqId, adminEmail });
     return res.status(403).json({ ok: false, error: "Forbidden" });
   }
 
@@ -94,9 +113,9 @@ export async function getManifest(req, res) {
       return res.status(400).json({ ok: false, error: "Missing token" });
 
     const [uploads, drafts, finals, sub, draftMeta] = await Promise.all([
-      listPrefix(`submissions/${token}/uploads/`),
-      listPrefix(`submissions/${token}/drafts/`),
-      listPrefix(`submissions/${token}/final/`),
+      listPrefix(`submissions/${token}/uploads/`, 1_000, reqId),
+      listPrefix(`submissions/${token}/drafts/`, 1_000, reqId),
+      listPrefix(`submissions/${token}/final/`, 1_000, reqId),
       FormSubmission.findOne({ submissionId: token }).lean(),
       FormDraft.findOne({ token }).lean(),
     ]);
@@ -111,22 +130,30 @@ export async function getManifest(req, res) {
       final: finals[0] || null,
     };
 
+    console.log("[admin][manifest]", {
+      reqId,
+      token,
+      uploads: uploads.length,
+      drafts: drafts.length,
+      finals: finals.length,
+    });
     res.json({ ok: true, manifest });
   } catch (err) {
-    console.error("getManifest error:", err);
+    console.error("getManifest error:", { reqId, error: err?.message || err });
     res.status(500).json({ ok: false, error: "Internal Server Error" });
   }
 }
 
 // GET /api/admin/file-url?key=...
 export async function adminFileUrl(req, res) {
-  // Authorization
+  const reqId = req.requestId || "-";
   const adminEmail = req.adminEmail;
   const allowed = (process.env.ADMIN_ALLOWED_EMAILS || "")
     .split(/[,;]\s*/)
     .map((s) => s.trim())
     .filter(Boolean);
   if (!adminEmail || !allowed.includes(adminEmail)) {
+    console.warn("[admin][file-url][forbidden]", { reqId, adminEmail });
     return res.status(403).json({ ok: false, error: "Forbidden" });
   }
 
@@ -139,11 +166,12 @@ export async function adminFileUrl(req, res) {
     const url = await getSignedUrl(
       s3,
       new GetObjectCommand({ Bucket: S3_BUCKET, Key: key }),
-      { expiresIn: 300 } // 5 min
+      { expiresIn: 300 }
     );
+    console.log("[S3][presign-get][admin]", { reqId, key, ttl: 300 });
     res.json({ ok: true, url });
   } catch (err) {
-    console.error("adminFileUrl error:", err);
+    console.error("adminFileUrl error:", { reqId, error: err?.message || err });
     res.status(500).json({ ok: false, error: "Internal Server Error" });
   }
 }

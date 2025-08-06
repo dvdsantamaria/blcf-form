@@ -9,7 +9,7 @@ import mongoose from "mongoose";
 import multer from "multer";
 import path from "path";
 import { fileURLToPath } from "url";
-
+import crypto from "crypto";
 import formRoutes from "./routes/form.js";
 import resumeRoutes from "./routes/resume.js";
 import adminRoutes from "./routes/admin.js";
@@ -50,6 +50,27 @@ app.use(cookieParser());
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true, limit: "2mb" }));
 app.use(rateLimit({ windowMs: 5 * 60 * 1000, max: 500 }));
+
+// ---- requestId + request/response logging (observability) ----
+app.use((req, res, next) => {
+  const rid = req.headers["x-request-id"] || crypto.randomUUID();
+  req.requestId = rid;
+  res.setHeader("X-Request-Id", rid);
+
+  const start = Date.now();
+  console.log("[req]", {
+    reqId: rid,
+    method: req.method,
+    url: req.originalUrl,
+  });
+
+  res.on("finish", () => {
+    const ms = Date.now() - start;
+    console.log("[res]", { reqId: rid, status: res.statusCode, ms });
+  });
+
+  next();
+});
 
 console.log("ENV CHECK:", {
   MONGO_URI: process.env.MONGO_URI,

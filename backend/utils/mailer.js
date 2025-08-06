@@ -38,9 +38,17 @@ function dump(obj) {
 
 /**
  * Send HTML email using Resend SDK.
- * Accepts optional text and replyTo.
+ * Accepts optional text, replyTo, kind (log label) and requestId.
  */
-export async function sendHtmlEmail({ to, subject, html, text, replyTo }) {
+export async function sendHtmlEmail({
+  to,
+  subject,
+  html,
+  text,
+  replyTo,
+  kind,
+  requestId,
+}) {
   try {
     const FROM =
       process.env.RESEND_FROM ||
@@ -48,37 +56,74 @@ export async function sendHtmlEmail({ to, subject, html, text, replyTo }) {
       "onboarding@resend.dev";
 
     if (!resend) {
-      console.warn("[Resend] Skipped (missing RESEND_API_KEY)", { to });
+      console.warn("[mail][skip]", {
+        reqId: requestId,
+        reason: "missing RESEND_API_KEY",
+        to,
+        kind,
+      });
       return { ok: false, skipped: true };
     }
     if (!to || !FROM) {
-      console.warn("[Resend] Skipped (missing to or from)", { to, FROM });
+      console.warn("[mail][skip]", {
+        reqId: requestId,
+        reason: "missing to/from",
+        to,
+        FROM,
+        kind,
+      });
       return { ok: false, skipped: true };
     }
+
+    console.log("[mail][send]", {
+      reqId: requestId,
+      kind: kind || "generic",
+      to,
+      subject,
+    });
 
     const { data, error } = await resend.emails.send({
       from: FROM,
       to,
       subject,
       html,
-      ...(text ? { text } : {}), // include plain text when provided
+      ...(text ? { text } : {}),
       ...(replyTo ? { reply_to: replyTo } : {}),
     });
 
     if (error) {
-      console.error("[Resend] send error:", dump(error));
+      console.error("[mail][error]", {
+        reqId: requestId,
+        kind: kind || "generic",
+        to,
+        error: dump(error),
+      });
       throw new Error(error?.message || dump(error));
     }
 
-    console.log("[Resend] sent", { to, id: data?.id });
+    console.log("[mail][sent]", {
+      reqId: requestId,
+      kind: kind || "generic",
+      to,
+      id: data?.id,
+    });
     return { ok: true, id: data?.id };
   } catch (e) {
-    console.error("[Resend] error:", e?.message || e);
+    console.error("[mail][catch]", {
+      reqId: requestId,
+      kind: kind || "generic",
+      to,
+      error: e?.message || String(e),
+    });
     return { ok: false, error: e?.message || String(e) };
   }
 }
-
-export async function sendSubmissionMail({ to, token, role = "user" }) {
+export async function sendSubmissionMail({
+  to,
+  token,
+  role = "user",
+  requestId,
+}) {
   const link = buildReaderLink(token);
   const subject =
     role === "admin"
@@ -114,5 +159,7 @@ Ref: ${token}
     html,
     text,
     replyTo: process.env.REPLY_TO || undefined,
+    kind: role === "admin" ? "submission.admin" : "submission.user",
+    requestId,
   });
 }

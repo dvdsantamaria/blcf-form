@@ -56,6 +56,7 @@ const S3_BUCKET =
 
 /* POST /api/resume/send-link */
 export async function sendResumeLink(req, res) {
+  const reqId = req.requestId || "-";
   try {
     const { email, token } = req.body || {};
     if (!isEmail(email))
@@ -67,7 +68,6 @@ export async function sendResumeLink(req, res) {
     if (!draft)
       return res.status(404).json({ ok: false, error: "Draft not found" });
 
-    // Create one time resume token
     const rt = genToken(24);
     const expiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
     await ResumeToken.create({
@@ -77,13 +77,11 @@ export async function sendResumeLink(req, res) {
       expiresAt,
     });
 
-    // Link that exchanges rt for cookie and redirects to UI
     const base = BACKEND_BASE_URL || PUBLIC_BASE_URL || "";
     const exchangeUrl = `${base}/api/resume/exchange?rt=${encodeURIComponent(
       rt
     )}`;
 
-    // Send email via Resend SDK (through utils/mailer.js)
     const subject = "Resume your application";
     const text = `Hello,
 
@@ -105,20 +103,29 @@ If you did not request this, please ignore this email.`;
       html,
       text,
       replyTo: process.env.REPLY_TO || undefined,
+      kind: "resume-link",
+      requestId: reqId,
     });
 
-    // Persist last email status for debugging
     await FormDraft.findOneAndUpdate(
       { token },
       { $set: { email, lastActivityAt: new Date(), lastEmailStatus: mail } },
       { upsert: true }
     );
 
-    console.log("[resume] token sent", { email, ok: mail?.ok, id: mail?.id });
+    console.log("[resume][send-link]", {
+      reqId,
+      email,
+      ok: mail?.ok,
+      id: mail?.id,
+    });
 
     return res.json({ ok: true, mail, exchangeUrl });
   } catch (err) {
-    console.error("sendResumeLink error:", err);
+    console.error("sendResumeLink error:", {
+      reqId,
+      error: err?.message || err,
+    });
     return res.status(500).json({ ok: false, error: "Internal Server Error" });
   }
 }
@@ -155,6 +162,7 @@ export async function exchangeResumeToken(req, res) {
 
 /* GET /api/resume/get-draft */
 export async function getDraft(req, res) {
+  const reqId = req.requestId || "-";
   try {
     const token = req.query?.token || req.cookies?.resume;
     if (!token)
@@ -172,6 +180,7 @@ export async function getDraft(req, res) {
       new GetObjectCommand({ Bucket: S3_BUCKET, Key: doc.s3Key })
     );
     const text = await streamToString(obj.Body);
+    console.log("[S3][read]", { reqId, key: doc.s3Key, bytes: text.length });
     const json = JSON.parse(text);
 
     const payload = json?.data || json || {};
@@ -179,7 +188,7 @@ export async function getDraft(req, res) {
 
     return res.json(payload);
   } catch (err) {
-    console.error("getDraft error:", err);
+    console.error("getDraft error:", { reqId, error: err?.message || err });
     return res.status(500).json({ ok: false, error: "Internal Server Error" });
   }
 }

@@ -60,9 +60,9 @@ async function streamToString(stream) {
   return Buffer.concat(chunks).toString("utf8");
 }
 
-async function putJsonToS3(key, obj) {
+async function putJsonToS3(key, obj, reqId) {
   const body = JSON.stringify(obj);
-  console.log("[putJsonToS3] Uploading", { key, size: body.length });
+  console.log("[S3][put]", { reqId, key, bytes: body.length });
   await s3.send(
     new PutObjectCommand({
       Bucket: BUCKET,
@@ -77,12 +77,12 @@ async function putJsonToS3(key, obj) {
 
 // ───────────────── SAVE DRAFT ─────────────────
 export const saveDraft = async (req, res) => {
+  const reqId = req.requestId || "-";
   try {
     const body = req.body || {};
     const now = new Date();
     const timestamp = now.toISOString();
 
-    // token del draft (nuevo o existente)
     const token =
       body.token && /^[A-Za-z0-9._~-]{10,}$/.test(body.token)
         ? body.token
@@ -95,12 +95,10 @@ export const saveDraft = async (req, res) => {
         ? emailRaw.trim()
         : null;
 
-    // keys S3
     const isoName = timestamp.replace(/[T:]/g, "").replace(/\.\d+Z$/, "Z");
     const currentKey = `submissions/${token}/drafts/current.json`;
     const historyKey = `submissions/${token}/drafts/${isoName}.json`;
 
-    // payload
     const fileKeys = extractFileKeysFromBody(body);
     const draftPayload = {
       token,
@@ -111,11 +109,15 @@ export const saveDraft = async (req, res) => {
       fileKeys,
     };
 
-    console.log("[save-draft] token:", token, "step:", step);
-    await putJsonToS3(currentKey, draftPayload);
-    await putJsonToS3(historyKey, draftPayload);
+    console.log("[save-draft][begin]", {
+      reqId,
+      token,
+      step,
+      hasEmail: !!email,
+    });
+    await putJsonToS3(currentKey, draftPayload, reqId);
+    await putJsonToS3(historyKey, draftPayload, reqId);
 
-    // MongoDraft
     await FormDraft.findOneAndUpdate(
       { token },
       {
@@ -132,7 +134,6 @@ export const saveDraft = async (req, res) => {
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
-    // ── ResumeToken (14 días renovable)
     const expiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
     const existing = await ResumeToken.findOne({
       submissionId: token,
@@ -144,7 +145,7 @@ export const saveDraft = async (req, res) => {
         { submissionId: token, used: false },
         { expiresAt }
       );
-      console.log("[save-draft] extended resume token expiry for", token);
+      console.log("[save-draft][resume-token-extend]", { reqId, token });
     } else if (email) {
       const rt = genToken(24);
       await ResumeToken.create({
@@ -160,25 +161,34 @@ export const saveDraft = async (req, res) => {
       const subject = "Resume your application";
       const text = `Hello,\n\nUse this secure link (valid 14 days) to resume your application:\n\n${exchangeUrl}\n\nIf you did not request this, ignore this email.`;
       const html = `<p>Hello,</p><p>Use this secure link (valid 14 days) to resume your application:</p><p><a href="${exchangeUrl}">${exchangeUrl}</a></p><p>If you did not request this, ignore this email.</p>`;
-      const mail = await sendHtmlEmail({ to: email, subject, text, html });
-      console.log("[save-draft] sent new resume link", {
+      const mail = await sendHtmlEmail({
+        to: email,
+        subject,
+        text,
+        html,
+        replyTo: process.env.REPLY_TO || undefined,
+        kind: "resume-link",
+        requestId: reqId,
+      });
+      console.log("[save-draft][resume-link-sent]", {
+        reqId,
         email,
-        rt,
         ok: mail.ok,
         id: mail.id,
       });
     }
 
-    console.log("✅ Draft saved:", token);
+    console.log("✅ Draft saved:", token, "(reqId:", reqId + ")");
     return res.status(200).json({ ok: true, token, s3Key: currentKey, step });
   } catch (err) {
-    console.error("save draft error:", err);
+    console.error("save draft error:", { reqId, error: err?.message || err });
     return res.status(500).json({ ok: false, error: "Internal Server Error" });
   }
 };
 
 // ───────────────── SUBMIT (FINAL) ─────────────────
 export const handleFormSubmission = async (req, res) => {
+  const reqId = req.requestId || "-";
   try {
     const body = req.body || {};
     const now = new Date();
@@ -206,8 +216,8 @@ export const handleFormSubmission = async (req, res) => {
       fileKeys,
     };
 
-    console.log("[submit] token:", token);
-    await putJsonToS3(finalKey, payload);
+    console.log("[submit][begin]", { reqId, token, hasEmail: !!patientEmail });
+    await putJsonToS3(finalKey, payload, reqId);
 
     await FormSubmission.findOneAndUpdate(
       { submissionId: token },
@@ -236,16 +246,18 @@ export const handleFormSubmission = async (req, res) => {
       { upsert: true }
     );
 
-    // ── Emails (paciente + admins)
     const emailTasks = [];
-
     if (patientEmail) {
       emailTasks.push(
-        sendSubmissionMail({ to: patientEmail, token, role: "user" })
+        sendSubmissionMail({
+          to: patientEmail,
+          token,
+          role: "user",
+          requestId: reqId,
+        })
       );
     }
 
-    // Notificar al cliente interno (sin expiración) usando ADMIN_ALLOWED_EMAILS
     const admins = (process.env.ADMIN_ALLOWED_EMAILS || "")
       .split(/[,;]\s*/)
       .map((s) => s.trim())
@@ -253,22 +265,32 @@ export const handleFormSubmission = async (req, res) => {
 
     for (const adminEmail of admins) {
       emailTasks.push(
-        sendSubmissionMail({ to: adminEmail, token, role: "admin" })
+        sendSubmissionMail({
+          to: adminEmail,
+          token,
+          role: "admin",
+          requestId: reqId,
+        })
       );
     }
 
-    await Promise.all(emailTasks);
+    const results = await Promise.all(emailTasks);
+    console.log("[submit][mails]", {
+      reqId,
+      count: results.length,
+      ids: results.map((r) => r?.id).filter(Boolean),
+    });
 
-    console.log("✅ Submission saved:", token);
+    console.log("✅ Submission saved:", token, "(reqId:", reqId + ")");
     return res.status(200).json({ ok: true, token, s3Key: finalKey });
   } catch (err) {
-    console.error("❌ submit error:", err);
+    console.error("❌ submit error:", { reqId, error: err?.message || err });
     return res.status(500).json({ ok: false, error: "Internal Server Error" });
   }
 };
-
 // ───────────────── PRESIGNED URL ─────────────────
 export const generateUploadUrl = async (req, res) => {
+  const reqId = req.requestId || "-";
   try {
     const { token, filename, type, field } = req.query;
     if (!token || !type || (!filename && !field)) {
@@ -287,7 +309,7 @@ export const generateUploadUrl = async (req, res) => {
     const iso = new Date().toISOString().replace(/[-:.TZ]/g, "");
     const key = `submissions/${token}/uploads/${iso}_${safeField}.${ext}`;
 
-    console.log("[presign] token:", token, "key:", key);
+    console.log("[S3][presign-put]", { reqId, token, key, contentType: type });
 
     const url = await getSignedUrl(
       s3,
@@ -301,45 +323,51 @@ export const generateUploadUrl = async (req, res) => {
     );
     return res.status(200).json({ ok: true, url, key });
   } catch (err) {
-    console.error("generateUploadUrl error:", err);
+    console.error("generateUploadUrl error:", {
+      reqId,
+      error: err?.message || err,
+    });
     return res.status(500).json({ ok: false, error: "Internal Server Error" });
   }
 };
 
 // ───────────────── PRESIGNED URL (GET) ─────────────────
 export const getFileUrl = async (req, res) => {
+  const reqId = req.requestId || "-";
   try {
     const { key } = req.query;
     if (!key) {
       return res.status(400).json({ ok: false, error: "Missing key" });
     }
-    // 60 segundos de validez
     const url = await getSignedUrl(
       s3,
       new GetObjectCommand({ Bucket: BUCKET, Key: key }),
       { expiresIn: 60 }
     );
+    console.log("[S3][presign-get]", { reqId, key, ttl: 60 });
     return res.json({ ok: true, url });
   } catch (err) {
-    console.error("getFileUrl error:", err);
+    console.error("getFileUrl error:", { reqId, error: err?.message || err });
     return res.status(500).json({ ok: false, error: "Internal Server Error" });
   }
 };
 
 // ───────────────── VIEW DATA (reader) ─────────────────
 export const getViewData = async (req, res) => {
+  const reqId = req.requestId || "-";
   try {
     const { token } = req.query || {};
     if (!token)
       return res.status(400).json({ ok: false, error: "Missing token" });
 
-    // 1) Intentar final
+    // 1) Final
     const finalKey = `submissions/${token}/final/submission.json`;
     try {
       const obj = await s3.send(
         new GetObjectCommand({ Bucket: BUCKET, Key: finalKey })
       );
       const text = await streamToString(obj.Body);
+      console.log("[S3][read]", { reqId, key: finalKey, bytes: text.length });
       const json = JSON.parse(text);
       return res.json({
         ok: true,
@@ -359,6 +387,7 @@ export const getViewData = async (req, res) => {
       new GetObjectCommand({ Bucket: BUCKET, Key: draftKey })
     );
     const text = await streamToString(obj.Body);
+    console.log("[S3][read]", { reqId, key: draftKey, bytes: text.length });
     const json = JSON.parse(text);
     return res.json({
       ok: true,
@@ -370,7 +399,7 @@ export const getViewData = async (req, res) => {
       fileKeys: json.fileKeys || [],
     });
   } catch (err) {
-    console.error("getViewData error:", err);
+    console.error("getViewData error:", { reqId, error: err?.message || err });
     return res.status(404).json({ ok: false, error: "Not found" });
   }
 };
