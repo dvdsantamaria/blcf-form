@@ -385,79 +385,17 @@
   });
 
   /* -------------------- Load data for reader -------------------- */
-  /* -------------------- Load data for reader -------------------- */
-(async function loadForReader() {
-  if (!isReader) return;
-  try {
-    const qs = new URLSearchParams(location.search);
-    const token = qs.get("token");
-    if (!token) return;
+  (async function loadForReader() {
+    if (!isReader) return;
+    try {
+      const qs = new URLSearchParams(location.search);
+      const token = qs.get("token");
+      if (!token) return;
 
-    const res = await fetch(`/api/form/view?token=${encodeURIComponent(token)}`);
-    if (!res.ok) return;
-
-    const payload = await res.json();
-    const data = payload?.data || {};
-
-    // hidratar campos de texto/checkbox/radio
-    Object.entries(data).forEach(([name, value]) => {
-      const input = elFor(name);
-      if (!input) return;
-      switch (input.type) {
-        case "checkbox":
-          input.checked = !!value;
-          break;
-        case "radio":
-          const radio = document.querySelector(
-            `input[name="${name}"][value="${value}"]`
-          );
-          if (radio) radio.checked = true;
-          break;
-        default:
-          input.value = value ?? "";
-      }
-    });
-
-    // reemplazar inputs de archivo por links firmados
-    const files = Array.isArray(payload?.fileKeys) ? payload.fileKeys : [];
-    for (const { field, key } of files) {
-      const input = elFor(field);
-      if (!input) continue;
-
-      // crear link
-      const fn = (key || "").split("/").pop() || (field || "file");
-      const a = document.createElement("a");
-      a.textContent = fn;
-      a.target = "_blank";
-      a.rel = "noopener";
-      a.className = "form-control-plaintext d-block";
-
-      try {
-        const r = await fetch(
-          `${API_BASE}/form/file-url?key=${encodeURIComponent(key)}`
-        );
-        const j = await r.json();
-        if (j?.ok && j.url) a.href = j.url;
-      } catch {
-        // si falla la firma, dejamos el texto sin href
-      }
-
-      // si es un input file, lo reemplazamos por el link
-      if (input.type === "file") {
-        input.replaceWith(a);
-      } else {
-        // fallback: insertamos el link después
-        input.insertAdjacentElement("afterend", a);
-      }
-    }
-
-    showToast(
-      payload.type === "submitted" ? "Viewing submission." : "Viewing draft."
-    );
-  } catch (err) {
-    console.error("Error loading reader form:", err);
-  }
-})();
+      const res = await fetch(
+        `/api/form/view?token=${encodeURIComponent(token)}`
+      );
+      if (!res.ok) return;
 
       const payload = await res.json();
       const data = payload?.data || {};
@@ -481,18 +419,18 @@
         }
       });
 
-      // render downloadable links for files
+      // replace file inputs with short-lived download links
       const files = Array.isArray(payload?.fileKeys) ? payload.fileKeys : [];
       for (const { field, key } of files) {
         const input = elFor(field);
         if (!input) continue;
-        input.dataset.s3key = key;
 
-        const fn = (key || "").split("/").pop() || readableName(field);
+        const fn = (key || "").split("/").pop() || field || "file";
         const a = document.createElement("a");
         a.textContent = fn;
         a.target = "_blank";
         a.rel = "noopener";
+        a.className = "form-control-plaintext d-block";
 
         try {
           const r = await fetch(
@@ -501,15 +439,12 @@
           const j = await r.json();
           if (j?.ok && j.url) a.href = j.url;
         } catch {
-          // ignore – leave link text without href if presign fails
+          // leave plain text if signing fails
         }
 
-        // hide the file input and insert link after it
         if (input.type === "file") {
-          input.style.display = "none";
-          input.insertAdjacentElement("afterend", a);
+          input.replaceWith(a);
         } else {
-          // fallback: append link next to the field
           input.insertAdjacentElement("afterend", a);
         }
       }
@@ -610,7 +545,6 @@
     });
 
     // Draft save
-
     window.saveStep = async function saveStep() {
       clearAllInvalid();
       if (!validateDraftMin()) return;
@@ -633,7 +567,6 @@
       });
 
       try {
-        // save draft via JSON
         const resp = await fetch(`${API_BASE}/save-draft`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
