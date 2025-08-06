@@ -9,7 +9,13 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import FormSubmission from "../models/FormSubmission.js";
 import FormDraft from "../models/FormDraft.js";
-import { sendSubmissionMail } from "../utils/mailer.js";
+import { sendSubmissionMail, sendHtmlEmail } from "../utils/mailer.js";
+import ResumeToken from "../models/ResumeToken.js";
+import {
+  genToken,
+  PUBLIC_BASE_URL,
+  BACKEND_BASE_URL,
+} from "./resumeController.js";
 
 // ───────────────── AWS clients ─────────────────
 const s3 = new S3Client({
@@ -19,13 +25,10 @@ const s3 = new S3Client({
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
   },
 });
-
 const BUCKET = process.env.AWS_S3_BUCKET || process.env.AWS_BUCKET_NAME;
-
 const kmsParams = process.env.AWS_KMS_KEY_ID
   ? { ServerSideEncryption: "aws:kms", SSEKMSKeyId: process.env.AWS_KMS_KEY_ID }
   : {};
-
 const EMAIL_RX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // ───────────────── Helpers ─────────────────
@@ -79,6 +82,7 @@ export const saveDraft = async (req, res) => {
     const now = new Date();
     const timestamp = now.toISOString();
 
+    // token del draft (nuevo o existente)
     const token =
       body.token && /^[A-Za-z0-9._~-]{10,}$/.test(body.token)
         ? body.token
@@ -91,10 +95,12 @@ export const saveDraft = async (req, res) => {
         ? emailRaw.trim()
         : null;
 
+    // keys S3
     const isoName = timestamp.replace(/[T:]/g, "").replace(/\.\d+Z$/, "Z");
     const currentKey = `submissions/${token}/drafts/current.json`;
     const historyKey = `submissions/${token}/drafts/${isoName}.json`;
 
+    // payload
     const fileKeys = extractFileKeysFromBody(body);
     const draftPayload = {
       token,
@@ -109,6 +115,7 @@ export const saveDraft = async (req, res) => {
     await putJsonToS3(currentKey, draftPayload);
     await putJsonToS3(historyKey, draftPayload);
 
+    // MongoDraft
     await FormDraft.findOneAndUpdate(
       { token },
       {
@@ -125,6 +132,43 @@ export const saveDraft = async (req, res) => {
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
+    // ── ResumeToken (14 días renovable)
+    const expiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+    const existing = await ResumeToken.findOne({
+      submissionId: token,
+      used: false,
+    });
+
+    if (existing) {
+      await ResumeToken.updateOne(
+        { submissionId: token, used: false },
+        { expiresAt }
+      );
+      console.log("[save-draft] extended resume token expiry for", token);
+    } else if (email) {
+      const rt = genToken(24);
+      await ResumeToken.create({
+        resumeToken: rt,
+        submissionId: token,
+        email,
+        expiresAt,
+      });
+      const base = BACKEND_BASE_URL || PUBLIC_BASE_URL || "";
+      const exchangeUrl = `${base}/api/resume/exchange?rt=${encodeURIComponent(
+        rt
+      )}`;
+      const subject = "Resume your application";
+      const text = `Hello,\n\nUse this secure link (valid 14 days) to resume your application:\n\n${exchangeUrl}\n\nIf you did not request this, ignore this email.`;
+      const html = `<p>Hello,</p><p>Use this secure link (valid 14 days) to resume your application:</p><p><a href="${exchangeUrl}">${exchangeUrl}</a></p><p>If you did not request this, ignore this email.</p>`;
+      const mail = await sendHtmlEmail({ to: email, subject, text, html });
+      console.log("[save-draft] sent new resume link", {
+        email,
+        rt,
+        ok: mail.ok,
+        id: mail.id,
+      });
+    }
+
     console.log("✅ Draft saved:", token);
     return res.status(200).json({ ok: true, token, s3Key: currentKey, step });
   } catch (err) {
@@ -132,6 +176,7 @@ export const saveDraft = async (req, res) => {
     return res.status(500).json({ ok: false, error: "Internal Server Error" });
   }
 };
+
 // ───────────────── SUBMIT (FINAL) ─────────────────
 export const handleFormSubmission = async (req, res) => {
   try {

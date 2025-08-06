@@ -19,24 +19,34 @@ const s3 = new S3Client({
 });
 
 /* ---------- Utils ---------- */
-function genToken(len = 24) {
+// export genToken so formController can import it
+export function genToken(len = 24) {
   return crypto.randomBytes(len).toString("base64url");
 }
+
 function isEmail(s) {
   return typeof s === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
 }
-async function streamToString(stream) {
+
+// export streamToString if ever needed elsewhere
+export async function streamToString(stream) {
   const chunks = [];
   for await (const chunk of stream) chunks.push(chunk);
   return Buffer.concat(chunks).toString("utf-8");
 }
 
 /* ---------- Const ---------- */
-const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || "").replace(/\/$/, "");
-const BACKEND_BASE_URL = (process.env.BACKEND_BASE_URL || "").replace(
+// export these so formController can build links
+export const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || "").replace(
   /\/$/,
   ""
 );
+export const BACKEND_BASE_URL = (process.env.BACKEND_BASE_URL || "").replace(
+  /\/$/,
+  ""
+);
+
+// keep S3_BUCKET internal
 const S3_BUCKET =
   process.env.S3_BUCKET || process.env.AWS_S3_BUCKET || process.env.BUCKET_NAME;
 
@@ -59,7 +69,7 @@ export async function sendResumeLink(req, res) {
 
     // Create one time resume token
     const rt = genToken(24);
-    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const expiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
     await ResumeToken.create({
       resumeToken: rt,
       submissionId: token,
@@ -77,7 +87,6 @@ export async function sendResumeLink(req, res) {
     const subject = "Resume your application";
     const text = `Hello,
 
-Use this secure link (valid 24 h) to resume your application:
 
 ${exchangeUrl}
 
@@ -85,7 +94,7 @@ If you did not request this, please ignore this email.`;
 
     const html = `
       <p>Hello,</p>
-      <p>Use this secure link (valid 24 h) to resume your application:</p>
+      <p>Use this secure link (valid for 14 days) to resume your application:</p>
       <p><a href="${exchangeUrl}">${exchangeUrl}</a></p>
       <p>If you did not request this, please ignore this email.</p>
     `;
@@ -132,7 +141,7 @@ export async function exchangeResumeToken(req, res) {
       httpOnly: true,
       secure: true,
       sameSite: "lax",
-      maxAge: 24 * 60 * 60 * 1000,
+      maxAge: 14 * 24 * 60 * 60 * 1000,
       path: "/",
     });
 

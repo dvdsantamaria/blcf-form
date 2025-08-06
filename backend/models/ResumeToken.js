@@ -5,7 +5,7 @@ const resumeTokenSchema = new mongoose.Schema(
     submissionId: { type: String, required: true, index: true }, // = token del draft
     email: { type: String },
     used: { type: Boolean, default: false },
-    expiresAt: { type: Date, index: { expires: 60 * 60 * 24 } }, // TTL 24h
+    expiresAt: { type: Date, index: { expires: 14 * 24 * 60 * 60 } },
   },
   { timestamps: true }
 );
