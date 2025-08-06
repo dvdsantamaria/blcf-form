@@ -275,41 +275,55 @@ export const handleFormSubmission = async (req, res) => {
     );
 
     // ── Notify admins only (reader link goes to admins, not the patient)
-    const notifyRaw =
-      process.env.SUBMISSION_NOTIFY_TO ||
-      process.env.ADMIN_NOTIFY_TO ||
-      process.env.ADMIN_ALLOWED_EMAILS ||
-      "";
+    // ── Notify admins only (reader link goes to admins, not the patient)
+    const notifyRaw = [
+      process.env.SUBMISSION_NOTIFY_TO || "",
+      process.env.ADMIN_NOTIFY_TO || "",
+      process.env.ADMIN_ALLOWED_EMAILS || "",
+    ]
+      .filter(Boolean)
+      .join(",");
 
+    // admitir comas, punto y coma y saltos de línea/espacios
     const recipients = notifyRaw
-      .split(/[,;]\s*/)
+      .split(/[,;\s]+/)
       .map((s) => s.trim())
       .filter(Boolean);
 
-    const emailTasks = [];
-    for (const to of recipients) {
-      console.log("[mail][send]", {
-        reqId,
-        kind: "submission.admin",
-        to,
-        subject: "BLCF – New grant application received",
-      });
-      emailTasks.push(
-        sendSubmissionMail({
-          to,
-          token,
-          role: "admin",
-          requestId: reqId,
-        })
-      );
-    }
+    console.log("[submit][notify]", { reqId, notifyRaw, recipients });
 
-    const results = await Promise.all(emailTasks);
-    console.log("[submit][mails]", {
-      reqId,
-      count: results.length,
-      ids: results.map((r) => r?.id).filter(Boolean),
-    });
+    if (recipients.length === 0) {
+      console.warn(
+        "[submit][notify] no recipients configured; skipping email",
+        {
+          reqId,
+        }
+      );
+    } else {
+      const emailTasks = [];
+      for (const to of recipients) {
+        console.log("[mail][send]", {
+          reqId,
+          kind: "submission.admin",
+          to,
+          subject: "BLCF – New grant application received",
+        });
+        emailTasks.push(
+          sendSubmissionMail({
+            to,
+            token,
+            role: "admin",
+            requestId: reqId,
+          })
+        );
+      }
+      const results = await Promise.all(emailTasks);
+      console.log("[submit][mails]", {
+        reqId,
+        count: results.length,
+        ids: results.map((r) => r?.id).filter(Boolean),
+      });
+    }
 
     console.log("✅ Submission saved:", token, "(reqId:", reqId + ")");
     return res.status(200).json({ ok: true, token, s3Key: finalKey });

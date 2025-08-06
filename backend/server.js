@@ -77,6 +77,11 @@ console.log("ENV CHECK:", {
   AWS_S3_BUCKET: process.env.AWS_S3_BUCKET || process.env.AWS_BUCKET_NAME,
   AWS_REGION: process.env.AWS_REGION,
   CORS_ALLOW_ORIGINS: allowedOrigins,
+  SUBMISSION_NOTIFY_TO: process.env.SUBMISSION_NOTIFY_TO,
+  ADMIN_NOTIFY_TO: process.env.ADMIN_NOTIFY_TO,
+  ADMIN_ALLOWED_EMAILS: (process.env.ADMIN_ALLOWED_EMAILS || "").split(
+    /[,;]\s*/
+  ),
 });
 
 /* ───────────── ROUTES ───────────── */
