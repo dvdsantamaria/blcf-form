@@ -367,26 +367,8 @@
     if (saveBtn) saveBtn.style.display = "none";
   }
 
-  if (isReader) {
-    if (submitBtn) submitBtn.style.display = "none";
-    if (saveBtn) saveBtn.style.display = "none";
-    document
-      .querySelectorAll("input, textarea, select")
-      .forEach((el) => (el.disabled = true));
-    showAllReaderMode();
-  }
-
-  /* -------------------- Form submit blocker in reader -------------------- */
-  grantForm?.addEventListener("submit", (e) => {
-    if (isReader) {
-      e.preventDefault();
-      showToast("Viewing only.");
-    }
-  });
-
-  /* -------------------- Load data for reader -------------------- */
-  (async function loadForReader() {
-    if (!isReader) return;
+  /* -------------------- Reader: run after DOM ready -------------------- */
+  async function loadForReader() {
     try {
       const qs = new URLSearchParams(location.search);
       const token = qs.get("token");
@@ -409,23 +391,35 @@
             input.checked = !!value;
             break;
           case "radio":
-            const radio = document.querySelector(
-              `input[name="${name}"][value="${value}"]`
-            );
-            if (radio) radio.checked = true;
+            {
+              const radio = document.querySelector(
+                `input[name="${name}"][value="${value}"]`
+              );
+              if (radio) radio.checked = true;
+            }
             break;
           default:
             input.value = value ?? "";
         }
       });
 
-      // replace file inputs with short-lived download links
+      // 1) replace ALL file inputs with a placeholder
+      const placeholders = new Map();
+      document.querySelectorAll('input[type="file"][name]').forEach((input) => {
+        const ph = document.createElement("span");
+        ph.className = "form-control-plaintext text-muted d-block";
+        ph.textContent = "No file uploaded";
+        ph.dataset.field = input.name;
+        placeholders.set(input.name, ph);
+        input.replaceWith(ph);
+      });
+
+      // 2) for each uploaded file, swap placeholder with a signed link
       const files = Array.isArray(payload?.fileKeys) ? payload.fileKeys : [];
       for (const { field, key } of files) {
-        const input = elFor(field);
-        if (!input) continue;
+        if (!field || !key) continue;
 
-        const fn = (key || "").split("/").pop() || field || "file";
+        const fn = (key || "").split("/").pop() || readableName(field);
         const a = document.createElement("a");
         a.textContent = fn;
         a.target = "_blank";
@@ -439,13 +433,15 @@
           const j = await r.json();
           if (j?.ok && j.url) a.href = j.url;
         } catch {
-          // leave plain text if signing fails
+          // keep as text if presign fails
         }
 
-        if (input.type === "file") {
-          input.replaceWith(a);
+        const ph = placeholders.get(field);
+        if (ph) {
+          ph.replaceWith(a);
         } else {
-          input.insertAdjacentElement("afterend", a);
+          const near = elFor(field);
+          if (near && near.parentElement) near.parentElement.appendChild(a);
         }
       }
 
@@ -455,7 +451,15 @@
     } catch (err) {
       console.error("Error loading reader form:", err);
     }
-  })();
+  }
+
+  /* -------------------- Form submit blocker in reader -------------------- */
+  grantForm?.addEventListener("submit", (e) => {
+    if (isReader) {
+      e.preventDefault();
+      showToast("Viewing only.");
+    }
+  });
 
   /* -------------------- Draft logic (edit mode) -------------------- */
   if (!isReader) {
@@ -549,7 +553,6 @@
       clearAllInvalid();
       if (!validateDraftMin()) return;
 
-      // build FormData to collect file-keys, then convert to JSON
       const formData = new FormData(grantForm);
       document.querySelectorAll('input[type="file"]').forEach((input) => {
         if (formData.has(input.name)) formData.delete(input.name);
@@ -560,7 +563,6 @@
       const existingToken = localStorage.getItem("draftToken");
       if (existingToken) formData.append("token", existingToken);
 
-      // convert FormData → plain object
       const payload = {};
       formData.forEach((value, key) => {
         payload[key] = value;
@@ -638,8 +640,19 @@
 
   /* -------------------- Initial render -------------------- */
   document.addEventListener("DOMContentLoaded", async () => {
-    if (isReader) return;
-    // if we just resumed, fetch and hydrate the draft (cookie gets sent automatically)
+    if (isReader) {
+      // reader-only setup after DOM is ready
+      if (submitBtn) submitBtn.style.display = "none";
+      if (saveBtn) saveBtn.style.display = "none";
+      document
+        .querySelectorAll("input, textarea, select")
+        .forEach((el) => (el.disabled = true));
+      showAllReaderMode();
+      await loadForReader();
+      return;
+    }
+
+    // edit mode: if we just resumed, hydrate draft (cookie sent automatically)
     const params = new URLSearchParams(location.search);
     if (params.get("resumed")) {
       try {
