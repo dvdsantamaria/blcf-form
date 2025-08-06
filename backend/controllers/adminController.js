@@ -53,13 +53,22 @@ async function listPrefix(Prefix, MaxKeys = 1_000) {
 /* ──────────────── Controllers ──────────────── */
 
 // GET /api/admin/submissions
-export async function listSubmissions(_, res) {
+export async function listSubmissions(req, res) {
+  // Authorization: only allow whitelisted admins
+  const adminEmail = req.adminEmail;
+  const allowed = (process.env.ADMIN_ALLOWED_EMAILS || "")
+    .split(/[,;]\s*/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (!adminEmail || !allowed.includes(adminEmail)) {
+    return res.status(403).json({ ok: false, error: "Forbidden" });
+  }
+
   try {
     const items = await FormSubmission.find({}, { _id: 0, __v: 0 })
       .sort({ createdAt: -1 })
       .limit(500)
       .lean();
-
     res.json({ ok: true, items });
   } catch (err) {
     console.error("listSubmissions error:", err);
@@ -69,6 +78,16 @@ export async function listSubmissions(_, res) {
 
 // GET /api/admin/submission/:token/manifest
 export async function getManifest(req, res) {
+  // Authorization
+  const adminEmail = req.adminEmail;
+  const allowed = (process.env.ADMIN_ALLOWED_EMAILS || "")
+    .split(/[,;]\s*/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (!adminEmail || !allowed.includes(adminEmail)) {
+    return res.status(403).json({ ok: false, error: "Forbidden" });
+  }
+
   try {
     const { token } = req.params;
     if (!token)
@@ -101,13 +120,21 @@ export async function getManifest(req, res) {
 
 // GET /api/admin/file-url?key=...
 export async function adminFileUrl(req, res) {
+  // Authorization
+  const adminEmail = req.adminEmail;
+  const allowed = (process.env.ADMIN_ALLOWED_EMAILS || "")
+    .split(/[,;]\s*/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (!adminEmail || !allowed.includes(adminEmail)) {
+    return res.status(403).json({ ok: false, error: "Forbidden" });
+  }
+
   try {
     const { key } = req.query || {};
-    if (!key) return res.status(400).json({ error: "Missing key" });
+    if (!key) return res.status(400).json({ ok: false, error: "Missing key" });
     if (!key.startsWith("submissions/"))
-      return res.status(400).json({ error: "Invalid key prefix" });
-    if (!S3_BUCKET)
-      return res.status(500).json({ error: "Missing S3 bucket env" });
+      return res.status(400).json({ ok: false, error: "Invalid key prefix" });
 
     const url = await getSignedUrl(
       s3,

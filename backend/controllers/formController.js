@@ -245,7 +245,8 @@ export const handleFormSubmission = async (req, res) => {
       );
     }
 
-    const admins = (process.env.ADMIN_NOTIFY_TO || process.env.NOTIFY_TO || "")
+    // Notificar al cliente interno (sin expiración) usando ADMIN_ALLOWED_EMAILS
+    const admins = (process.env.ADMIN_ALLOWED_EMAILS || "")
       .split(/[,;]\s*/)
       .map((s) => s.trim())
       .filter(Boolean);
