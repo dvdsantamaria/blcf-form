@@ -305,6 +305,26 @@ export const generateUploadUrl = async (req, res) => {
   }
 };
 
+// ───────────────── PRESIGNED URL (GET) ─────────────────
+export const getFileUrl = async (req, res) => {
+  try {
+    const { key } = req.query;
+    if (!key) {
+      return res.status(400).json({ ok: false, error: "Missing key" });
+    }
+    // 60 segundos de validez
+    const url = await getSignedUrl(
+      s3,
+      new GetObjectCommand({ Bucket: BUCKET, Key: key }),
+      { expiresIn: 60 }
+    );
+    return res.json({ ok: true, url });
+  } catch (err) {
+    console.error("getFileUrl error:", err);
+    return res.status(500).json({ ok: false, error: "Internal Server Error" });
+  }
+};
+
 // ───────────────── VIEW DATA (reader) ─────────────────
 export const getViewData = async (req, res) => {
   try {

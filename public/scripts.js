@@ -663,7 +663,7 @@
   /* -------------------- Initial render -------------------- */
   document.addEventListener("DOMContentLoaded", async () => {
     if (isReader) return;
-    // if we just resumed, fetch the draft (cookie gets sent automatically)
+    // if we just resumed, fetch and hydrate the draft (cookie gets sent automatically)
     const params = new URLSearchParams(location.search);
     if (params.get("resumed")) {
       try {
@@ -671,21 +671,37 @@
           method: "GET",
           credentials: "include",
         });
-        if (res.ok) {
-          const data = await res.json();
-          Object.entries(data).forEach(([name, value]) => {
-            const input = elFor(name);
-            if (!input) return;
-            if (input.type === "checkbox") {
-              input.checked = Boolean(value);
+        if (!res.ok) throw new Error(`get-draft ${res.status}`);
+        const payload = await res.json();
+
+        // flatten nested data into dot-notation keys
+        const flatten = (obj, prefix = "", res = {}) => {
+          for (const [k, v] of Object.entries(obj)) {
+            const key = prefix ? `${prefix}.${k}` : k;
+            if (v && typeof v === "object" && !Array.isArray(v)) {
+              flatten(v, key, res);
             } else {
-              input.value = value ?? "";
+              res[key] = v;
             }
-          });
-          if (typeof data.step === "number") currentStep = data.step;
-        }
-      } catch (e) {
-        console.error("Error loading draft:", e);
+          }
+          return res;
+        };
+        const flat = flatten(payload);
+
+        Object.entries(flat).forEach(([name, value]) => {
+          const input = elFor(name);
+          if (!input) return;
+          if (input.type === "checkbox") {
+            input.checked = Boolean(value);
+          } else {
+            input.value = value ?? "";
+          }
+        });
+
+        if (typeof flat.step === "number") currentStep = flat.step;
+      } catch (err) {
+        console.error("Error loading draft:", err);
+        showToast("Could not load your draft.");
       }
     }
     showStep(currentStep);
