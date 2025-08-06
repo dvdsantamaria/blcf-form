@@ -214,6 +214,7 @@ export const saveDraft = async (req, res) => {
   }
 };
 // ───────────────── SUBMIT (FINAL) ─────────────────
+// ───────────────── SUBMIT (FINAL) ─────────────────
 export const handleFormSubmission = async (req, res) => {
   const reqId = req.requestId || "-";
   try {
@@ -273,27 +274,29 @@ export const handleFormSubmission = async (req, res) => {
       { upsert: true }
     );
 
-    const emailTasks = [];
-    if (patientEmail) {
-      emailTasks.push(
-        sendSubmissionMail({
-          to: patientEmail,
-          token,
-          role: "user",
-          requestId: reqId,
-        })
-      );
-    }
+    // ── Notify admins only (reader link goes to admins, not the patient)
+    const notifyRaw =
+      process.env.SUBMISSION_NOTIFY_TO ||
+      process.env.ADMIN_NOTIFY_TO ||
+      process.env.ADMIN_ALLOWED_EMAILS ||
+      "";
 
-    const admins = (process.env.ADMIN_ALLOWED_EMAILS || "")
+    const recipients = notifyRaw
       .split(/[,;]\s*/)
       .map((s) => s.trim())
       .filter(Boolean);
 
-    for (const adminEmail of admins) {
+    const emailTasks = [];
+    for (const to of recipients) {
+      console.log("[mail][send]", {
+        reqId,
+        kind: "submission.admin",
+        to,
+        subject: "BLCF – New grant application received",
+      });
       emailTasks.push(
         sendSubmissionMail({
-          to: adminEmail,
+          to,
           token,
           role: "admin",
           requestId: reqId,
