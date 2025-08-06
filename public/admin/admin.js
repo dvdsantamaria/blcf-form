@@ -132,21 +132,31 @@ function loadList(items) {
 }
 
 // === Detalle ===
-// === Detalle ===
 async function showDetail(token) {
   try {
     const data = await api(`/submission/${encodeURIComponent(token)}/manifest`);
     document.getElementById("detToken").textContent = token;
-    const container = document.getElementById("manifest");
+
+    // Asegurar contenedor adecuado (si sigue siendo <pre>, lo reemplazamos por <div>)
+    let container = document.getElementById("manifest");
+    if (!container) return;
+    if (container.tagName === "PRE") {
+      const div = document.createElement("div");
+      div.id = "manifest";
+      div.className = "list-group";
+      container.replaceWith(div);
+      container = div;
+    }
     container.innerHTML = "";
 
-    // helper to render one file entry
+    // helper para un ítem
     const renderEntry = (key, label) => {
       const item = document.createElement("div");
       item.className =
         "list-group-item d-flex justify-content-between align-items-center";
 
       const fn = label || key.split("/").pop();
+
       const link = document.createElement("a");
       link.textContent = fn;
       link.href = "#";
@@ -157,7 +167,7 @@ async function showDetail(token) {
             `/api/admin/file-url?key=${encodeURIComponent(key)}`
           );
           const j = await res.json();
-          if (j.ok) window.open(j.url, "_blank", "noopener");
+          if (j.ok && j.url) window.open(j.url, "_blank", "noopener");
           else alert("Failed to get file URL");
         } catch {
           alert("Error fetching file URL");
@@ -176,11 +186,11 @@ async function showDetail(token) {
       container.appendChild(item);
     };
 
-    // render uploads
+    // uploads
     for (const { key } of data.manifest.uploads || []) {
       renderEntry(key);
     }
-    // render final submission file if present
+    // final.json si existe
     if (data.manifest.final?.key) {
       renderEntry(data.manifest.final.key, "Final submission");
     }
