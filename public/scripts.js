@@ -368,6 +368,7 @@
   }
 
   /* -------------------- Reader: run after DOM ready -------------------- */
+  /* -------------------- Reader: run after DOM ready -------------------- */
   async function loadForReader() {
     try {
       const qs = new URLSearchParams(location.search);
@@ -382,28 +383,31 @@
       const payload = await res.json();
       const data = payload?.data || {};
 
-      // hydrate text/checkbox/radio fields
+      // Hydrate text/checkbox/radio fields (skip file inputs!)
       Object.entries(data).forEach(([name, value]) => {
         const input = elFor(name);
         if (!input) return;
+
         switch (input.type) {
           case "checkbox":
             input.checked = !!value;
             break;
-          case "radio":
-            {
-              const radio = document.querySelector(
-                `input[name="${name}"][value="${value}"]`
-              );
-              if (radio) radio.checked = true;
-            }
+          case "radio": {
+            const radio = document.querySelector(
+              `input[name="${name}"][value="${value}"]`
+            );
+            if (radio) radio.checked = true;
+            break;
+          }
+          case "file":
+            // never set value on file inputs
             break;
           default:
             input.value = value ?? "";
         }
       });
 
-      // 1) replace ALL file inputs with a placeholder
+      // 1) Replace ALL file inputs with a placeholder
       const placeholders = new Map();
       document.querySelectorAll('input[type="file"][name]').forEach((input) => {
         const ph = document.createElement("span");
@@ -414,7 +418,7 @@
         input.replaceWith(ph);
       });
 
-      // 2) for each uploaded file, swap placeholder with a signed link
+      // 2) For each uploaded file, swap placeholder with a signed link
       const files = Array.isArray(payload?.fileKeys) ? payload.fileKeys : [];
       for (const { field, key } of files) {
         if (!field || !key) continue;
@@ -433,7 +437,7 @@
           const j = await r.json();
           if (j?.ok && j.url) a.href = j.url;
         } catch {
-          // keep as text if presign fails
+          // keep text without href if presign fails
         }
 
         const ph = placeholders.get(field);
@@ -452,7 +456,6 @@
       console.error("Error loading reader form:", err);
     }
   }
-
   /* -------------------- Form submit blocker in reader -------------------- */
   grantForm?.addEventListener("submit", (e) => {
     if (isReader) {
