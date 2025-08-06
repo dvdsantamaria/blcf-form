@@ -133,34 +133,56 @@ export const saveDraft = async (req, res) => {
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
-
     const expiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
-    const existing = await ResumeToken.findOne({
+    // Try to find an existing, unused resume token
+    let rtDoc = await ResumeToken.findOne({
       submissionId: token,
       used: false,
     });
 
-    if (existing) {
+    if (rtDoc) {
+      // Extend its expiration
       await ResumeToken.updateOne(
         { submissionId: token, used: false },
         { expiresAt }
       );
       console.log("[save-draft][resume-token-extend]", { reqId, token });
-    } else if (email) {
-      const rt = genToken(24);
-      await ResumeToken.create({
-        resumeToken: rt,
-        submissionId: token,
-        email,
-        expiresAt,
-      });
+    }
+
+    // Throttle re-sending the resume email to once per N hours
+    const throttleHrs = Number(process.env.RESUME_EMAIL_THROTTLE_HOURS) || 24;
+    const throttleMs = throttleHrs * 3600 * 1000;
+    const draftRecord = await FormDraft.findOne({ token }).lean();
+    const lastSent = draftRecord?.lastResumeEmailAt
+      ? new Date(draftRecord.lastResumeEmailAt).getTime()
+      : 0;
+    const shouldSend = email && Date.now() - lastSent > throttleMs;
+
+    if (shouldSend) {
+      // Use existing token or generate a new one
+      const rt = rtDoc?.resumeToken || genToken(24);
+      if (!rtDoc) {
+        await ResumeToken.create({
+          resumeToken: rt,
+          submissionId: token,
+          email,
+          expiresAt,
+        });
+      }
+
+      // Build the resume link
       const base = BACKEND_BASE_URL || PUBLIC_BASE_URL || "";
       const exchangeUrl = `${base}/api/resume/exchange?rt=${encodeURIComponent(
         rt
       )}`;
       const subject = "Resume your application";
       const text = `Hello,\n\nUse this secure link (valid 14 days) to resume your application:\n\n${exchangeUrl}\n\nIf you did not request this, ignore this email.`;
-      const html = `<p>Hello,</p><p>Use this secure link (valid 14 days) to resume your application:</p><p><a href="${exchangeUrl}">${exchangeUrl}</a></p><p>If you did not request this, ignore this email.</p>`;
+      const html = `<p>Hello,</p>
+        <p>Use this secure link (valid 14 days) to resume your application:</p>
+        <p><a href="${exchangeUrl}">${exchangeUrl}</a></p>
+        <p>If you did not request this, ignore this email.</p>`;
+
+      // Send the email
       const mail = await sendHtmlEmail({
         to: email,
         subject,
@@ -176,6 +198,12 @@ export const saveDraft = async (req, res) => {
         ok: mail.ok,
         id: mail.id,
       });
+
+      // Record when and to whom we sent the last resume email
+      await FormDraft.updateOne(
+        { token },
+        { $set: { lastResumeEmailAt: new Date(), lastResumeEmailTo: email } }
+      );
     }
 
     console.log("✅ Draft saved:", token, "(reqId:", reqId + ")");
@@ -185,7 +213,6 @@ export const saveDraft = async (req, res) => {
     return res.status(500).json({ ok: false, error: "Internal Server Error" });
   }
 };
-
 // ───────────────── SUBMIT (FINAL) ─────────────────
 export const handleFormSubmission = async (req, res) => {
   const reqId = req.requestId || "-";

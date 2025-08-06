@@ -15,8 +15,16 @@ const formDraftSchema = new mongoose.Schema({
     select: false,
   },
   lastActivityAt: { type: Date, default: Date.now },
-  updatedAt: { type: Date, default: Date.now, expires: 60 * 60 * 24 * 180 },
+  updatedAt: {
+    type: Date,
+    default: Date.now,
+    expires: 60 * 60 * 24 * 180, // 180 days
+  },
   finalizedAt: { type: Date },
+
+  // ← nuevos para control de envíos de mail de reanudación:
+  lastResumeEmailAt: { type: Date },
+  lastResumeEmailTo: { type: String, select: false },
 });
 
 const FormDraft = mongoose.model("FormDraft", formDraftSchema);

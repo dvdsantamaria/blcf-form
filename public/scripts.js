@@ -548,7 +548,7 @@
     });
 
     // Draft save
-    // Draft save
+
     window.saveStep = async function saveStep() {
       clearAllInvalid();
       if (!validateDraftMin()) return;
@@ -582,59 +582,6 @@
 
         const tokenFromResp = json.token || existingToken;
         if (json.token) localStorage.setItem("draftToken", json.token);
-
-        // send resume link once per token
-        const emailEl = elFor("parent1.email");
-        const email = emailEl?.value?.trim();
-        const sentKey = tokenFromResp ? `resumeSent:${tokenFromResp}` : null;
-
-        try {
-          const already = sentKey ? localStorage.getItem(sentKey) : null;
-          console.log("[resume][client] decide-send", {
-            email,
-            token: tokenFromResp,
-            already,
-          });
-
-          const ALWAYS_SEND = false;
-
-          if (
-            email &&
-            isEmail(email) &&
-            tokenFromResp &&
-            (ALWAYS_SEND || !already)
-          ) {
-            const linkResp = await fetch(`${API_BASE}/resume/send-link`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ token: tokenFromResp, email }),
-            });
-
-            const text = await linkResp.text();
-            console.log("[resume][client] send-link result", {
-              ok: linkResp.ok,
-              status: linkResp.status,
-              body: text,
-            });
-
-            if (linkResp.ok && sentKey && !ALWAYS_SEND) {
-              localStorage.setItem(sentKey, "1");
-              showToast("Draft saved and email sent.");
-            } else if (!linkResp.ok) {
-              showToast("Could not send email.");
-            }
-          } else {
-            console.log("[resume][client] skipped-send", {
-              reason: "guard failed",
-              email,
-              token: tokenFromResp,
-              already,
-            });
-          }
-        } catch (e) {
-          console.error("send-link error:", e);
-          showToast("Email send error.");
-        }
 
         console.log("✅ Draft saved:", tokenFromResp);
         showToast("Draft saved.");
