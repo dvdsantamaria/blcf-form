@@ -400,6 +400,7 @@
       const payload = await res.json();
       const data = payload?.data || {};
 
+      // hydrate text/checkbox/radio fields
       Object.entries(data).forEach(([name, value]) => {
         const input = elFor(name);
         if (!input) return;
@@ -417,6 +418,39 @@
             input.value = value ?? "";
         }
       });
+
+      // render downloadable links for files
+      const files = Array.isArray(payload?.fileKeys) ? payload.fileKeys : [];
+      for (const { field, key } of files) {
+        const input = elFor(field);
+        if (!input) continue;
+        input.dataset.s3key = key;
+
+        const fn = (key || "").split("/").pop() || readableName(field);
+        const a = document.createElement("a");
+        a.textContent = fn;
+        a.target = "_blank";
+        a.rel = "noopener";
+
+        try {
+          const r = await fetch(
+            `${API_BASE}/form/file-url?key=${encodeURIComponent(key)}`
+          );
+          const j = await r.json();
+          if (j?.ok && j.url) a.href = j.url;
+        } catch {
+          // ignore – leave link text without href if presign fails
+        }
+
+        // hide the file input and insert link after it
+        if (input.type === "file") {
+          input.style.display = "none";
+          input.insertAdjacentElement("afterend", a);
+        } else {
+          // fallback: append link next to the field
+          input.insertAdjacentElement("afterend", a);
+        }
+      }
 
       showToast(
         payload.type === "submitted" ? "Viewing submission." : "Viewing draft."

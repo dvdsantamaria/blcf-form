@@ -132,15 +132,59 @@ function loadList(items) {
 }
 
 // === Detalle ===
+// === Detalle ===
 async function showDetail(token) {
   try {
     const data = await api(`/submission/${encodeURIComponent(token)}/manifest`);
     document.getElementById("detToken").textContent = token;
-    document.getElementById("manifest").textContent = JSON.stringify(
-      data.manifest,
-      null,
-      2
-    );
+    const container = document.getElementById("manifest");
+    container.innerHTML = "";
+
+    // helper to render one file entry
+    const renderEntry = (key, label) => {
+      const item = document.createElement("div");
+      item.className =
+        "list-group-item d-flex justify-content-between align-items-center";
+
+      const fn = label || key.split("/").pop();
+      const link = document.createElement("a");
+      link.textContent = fn;
+      link.href = "#";
+      link.addEventListener("click", async (e) => {
+        e.preventDefault();
+        try {
+          const res = await fetch(
+            `/api/admin/file-url?key=${encodeURIComponent(key)}`
+          );
+          const j = await res.json();
+          if (j.ok) window.open(j.url, "_blank", "noopener");
+          else alert("Failed to get file URL");
+        } catch {
+          alert("Error fetching file URL");
+        }
+      });
+
+      const btn = document.createElement("button");
+      btn.className = "btn btn-sm btn-outline-secondary";
+      btn.textContent = "Copy key";
+      btn.addEventListener("click", () => {
+        navigator.clipboard.writeText(key);
+      });
+
+      item.appendChild(link);
+      item.appendChild(btn);
+      container.appendChild(item);
+    };
+
+    // render uploads
+    for (const { key } of data.manifest.uploads || []) {
+      renderEntry(key);
+    }
+    // render final submission file if present
+    if (data.manifest.final?.key) {
+      renderEntry(data.manifest.final.key, "Final submission");
+    }
+
     document.getElementById("detail").classList.remove("hidden");
   } catch (e) {
     alert("Error manifest: " + e.message);
