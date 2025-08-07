@@ -109,9 +109,41 @@ app.use("/api/resume", (req, res, next) => {
 // resume routes (send-link, exchange, whoami, etc)
 app.use("/api/resume", resumeRoutes);
 /* ───────────── ADMIN MAGIC TOKEN ───────────── */
-const magic = buildAdminMagicRouter();
-app.use("/api/admin/auth", magic.router);
-app.use("/api/admin", authAdminMagic(magic.config), adminRoutes);
+/* ───────────── ADMIN MAGIC TOKEN ───────────── */
+
+// Normalize env list to lowercase and trimmed
+const allowedAdminEmails = (process.env.ADMIN_ALLOWED_EMAILS || "")
+  .split(/[,;]\s*/)
+  .map((e) => e.trim().toLowerCase())
+  .filter(Boolean);
+
+// Build one shared config and reuse it for both the /auth router and the guard
+const { router: adminAuthRouter, config: adminCfg } = buildAdminMagicRouter({
+  allowedEmails: allowedAdminEmails,
+  uiBaseUrl:
+    process.env.ADMIN_UI_BASE_URL ||
+    "https://grants.beyondlimitscf.org.au/admin/", // keep trailing slash
+  jwtSecret: process.env.ADMIN_JWT_SECRET || "", // must be same across restarts
+  sessionSecret: process.env.ADMIN_SESSION_SECRET || "", // must be same across restarts
+  mailer: process.env.ADMIN_MAILER || "resend",
+  resendKey: process.env.RESEND_API_KEY || "",
+  mailFrom:
+    process.env.ADMIN_NOTIFY_FROM ||
+    process.env.SUBMISSION_NOTIFY_TO ||
+    "no-reply@grants.beyondlimitscf.org.au",
+  brandName: process.env.ADMIN_BRAND || "Admin Access",
+  apiBasePath: "/api/admin/auth",
+});
+
+// Mount with the exact same config instance
+app.use("/api/admin/auth", adminAuthRouter);
+app.use("/api/admin", authAdminMagic(adminCfg), adminRoutes);
+
+// Optional short log to verify at boot
+console.log("[admin-magic]", {
+  allowed: adminCfg.allowedEmails,
+  uiBaseUrl: adminCfg.uiBaseUrl,
+});
 
 /* ───────────── STATIC ADMIN UI ───────────── */
 const __filename = fileURLToPath(import.meta.url);
