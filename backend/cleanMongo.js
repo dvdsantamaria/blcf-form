@@ -1,7 +1,9 @@
+// backend/cleanMongo.js
+import "dotenv/config";
 import mongoose from "mongoose";
-import Submission from "./src/models/Submission.js"; // ← ajustá la ruta
+import FormSubmission from "./models/FormSubmission.js";
 
 await mongoose.connect(process.env.MONGO_URI);
-await Submission.deleteMany({});
-console.log("Submissions wiped");
+await FormSubmission.deleteMany({});
+console.log("🧨 Submissions wiped");
 process.exit(0);
