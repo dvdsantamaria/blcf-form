@@ -109,7 +109,6 @@ app.use("/api/resume", (req, res, next) => {
 // resume routes (send-link, exchange, whoami, etc)
 app.use("/api/resume", resumeRoutes);
 /* ───────────── ADMIN MAGIC TOKEN ───────────── */
-/* ───────────── ADMIN MAGIC TOKEN ───────────── */
 
 // Normalize env list to lowercase and trimmed
 const allowedAdminEmails = (process.env.ADMIN_ALLOWED_EMAILS || "")
