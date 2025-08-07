@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
-import Submission from "./models/Submission.js"; // asegurate de tener este modelo
+import Submission from "./src/models/Submission.js"; // ← ajustá la ruta
 
 await mongoose.connect(process.env.MONGO_URI);
 await Submission.deleteMany({});
-await mongoose.disconnect();
-console.log("MongoDB submissions collection cleaned.");
+console.log("Submissions wiped");
+process.exit(0);
