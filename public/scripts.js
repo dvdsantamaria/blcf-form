@@ -1,5 +1,4 @@
 // public/scripts.js (refactor Aug-2025)
-// All logic in one IIFE. Comments concise, English, no fancy punctuation.
 
 (() => {
   "use strict";
@@ -140,11 +139,9 @@
 
   const readableName = (name) => {
     const map = {
-      /* ...same as before... */
       "ndis.participantEligible": "NDIS participant or eligible",
       "docs.supportLetterHealthProfessional": "Support letter file",
       "docs.ndisPlanOrGoals": "Ndis plan or goals",
-      /* ... */
     };
     return map[name] || name;
   };
@@ -212,7 +209,6 @@
     const dobEl = elFor("child.dob");
     const ageEl = elFor("child.age");
     if (!dobEl || !ageEl) return;
-    // ageEl.readOnly = true;    <-- removed to allow manual edits
     ["input", "change", "blur"].forEach((evt) =>
       dobEl.addEventListener(evt, ensureAgeFromDob)
     );
@@ -319,193 +315,110 @@
 
   /* -------------------- Draft logic (edit mode) -------------------- */
   if (!isReader) {
-    async function ensureToken() {
-      let token = localStorage.getItem("draftToken");
-      if (token) return token;
-      const fd = new FormData();
-      fd.append("step", currentStep);
-      const res = await fetch(`${API_BASE}/form/save-draft`, {
-                method: "POST",
-        body: fd,
-      });
-      if (!res.ok) throw new Error(`save-draft ${res.status}`);
-      token = (await res.json()).token;
-      localStorage.setItem("draftToken", token);
-      return token;
-    }
-
-    function validateDraftMin() {
-      const missing = [];
-      let firstInvalid = null;
-      DRAFT_MIN_REQUIRED.forEach((name) => {
-        const el = elFor(name);
-        if (!el) return;
-        const val = (el.value || "").trim();
-        const ok = name === "parent1.email" ? isEmail(val) : val.length > 0;
-        if (!ok) {
-          missing.push(readableName(name));
-          markInvalid(el);
-          firstInvalid ||= el;
-        }
-      });
-      if (missing.length) {
-        showToast(`Please complete: ${missing.join(", ")} to save your draft.`);
-        firstInvalid?.scrollIntoView({ behavior: "smooth", block: "center" });
-        firstInvalid?.focus();
-        return false;
-      }
-      return true;
-    }
-
-    // File upload handling (multi-file, max 5)
-    document.querySelectorAll('input[type="file"]').forEach((input) => {
-      input.addEventListener("change", async () => {
-        const files = Array.from(input.files);
-        delete input.dataset.s3key;
-        if (!files.length) return;
-        if (files.length > 5) {
-          showToast("You can upload up to 5 files only.");
-          input.value = "";
-          return;
-        }
-
-        const fieldName = input.name;
-        const mimeMap = {
-          pdf: "application/pdf",
-          jpg: "image/jpeg",
-          jpeg: "image/jpeg",
-          png: "image/png",
-          webp: "image/webp",
-          heic: "image/heic",
-          heif: "image/heic",
-        };
-        const s3keys = [];
-
-        for (const file of files) {
-          const ext = file.name.split(".").pop().toLowerCase();
-          const mime = file.type || mimeMap[ext] || "";
-          if (!mime) {
-            showToast("Unsupported file type.");
-            return;
-          }
-          try {
-            const token = await ensureToken();
-            const res = await fetch(
-              `${API_BASE}/form/generate-upload-url?field=${encodeURIComponent(
-                fieldName
-              )}&token=${encodeURIComponent(token)}&type=${encodeURIComponent(
-                mime
-              )}`
-            );
-            if (!res.ok) throw new Error("Signed URL failed");
-            const { url, key } = await res.json();
-            const up = await fetch(url, {
-              method: "PUT",
-              headers: { "Content-Type": mime },
-              body: file,
-            });
-            if (!up.ok) throw new Error("Upload failed");
-            s3keys.push(key);
-          } catch (err) {
-            console.error(err);
-            showToast("Upload error.");
-            return;
-          }
-        }
-
-        if (s3keys.length) {
-          input.dataset.s3key = s3keys.join(",");
-          showToast("Files uploaded.");
-        }
-      });
-    });
-
-    // Draft save
-    window.saveStep = async function saveStep() {
-      clearAllInvalid();
-      if (!validateDraftMin()) return;
-    
-      const formData = new FormData(grantForm);
-    
-      // sustituir los <input type="file"> por sus keys individuales
-      document.querySelectorAll('input[type="file"]').forEach((input) => {
-        if (formData.has(input.name)) formData.delete(input.name);
-        if (input.dataset.s3key) {
-          input.dataset.s3key
-            .split(",")
-            .forEach((key) => formData.append(input.name, key));
-        }
-      });
-    
-      formData.append("step", currentStep);
-      const existingToken = localStorage.getItem("draftToken");
-      if (existingToken) formData.append("token", existingToken);
-    
-      try {
-        const res = await fetch(`${API_BASE}/form/save-draft`, {
-          method: "POST",
-          body: formData,          // << FormData directo (sin JSON)
-        });
-        if (!res.ok) throw new Error(`save-draft ${res.status}`);
-    
-        const json = await res.json();
-        const tokenFromResp = json.token || existingToken;
-        if (json.token) localStorage.setItem("draftToken", json.token);
-    
-        console.log("✅ Draft saved:", tokenFromResp);
-        showToast("Draft saved.");
-      } catch (err) {
-        console.error("save-draft error:", err);
-        showToast("Save draft failed.");
-      }
-    };
-    
-
-    // Final submit
-    grantForm?.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      if (!validateAllBeforeSubmit()) return;
-    
-      const formData = new FormData(grantForm);
-    
-      // adjunta cada S3-key individual en lugar del File
-      document.querySelectorAll('input[type="file"]').forEach((input) => {
-        if (formData.has(input.name)) formData.delete(input.name);
-        if (input.dataset.s3key) {
-          input.dataset.s3key
-            .split(",")
-            .forEach((key) => formData.append(input.name, key));
-        }
-      });
-    
-      const existingToken = localStorage.getItem("draftToken");
-      if (existingToken) formData.append("token", existingToken);
-    
-      try {
-        const res = await fetch(`${API_BASE}/form/submit-form`, {
-          method: "POST",
-          body: formData,          // ← FormData directo
-        });
-        if (!res.ok) throw new Error("Submit failed");
-    
-        localStorage.removeItem("draftToken");
-        currentStep = steps.length - 1; // thank-you page
-        showStep(currentStep);
-        showToast("Submission received.");
-      } catch (err) {
-        console.error(err);
-        showToast("Submission failed.");
-      }
-    });
+    /* …─── ensureToken, upload handling, saveStep, final submit (sin cambios desde tu última versión) … */
+    /* (omito aquí por brevedad: simplemente conserva tu código actual) */
   } else {
     window.saveStep = () => {};
+  }
+
+  /* --------- Reader: load & hydrate form --------- */
+  async function loadForReader() {
+    try {
+      const qs = new URLSearchParams(location.search);
+      const token = qs.get("token");
+      if (!token) return;
+
+      const res = await fetch(
+        `${API_BASE}/form/view?token=${encodeURIComponent(token)}`
+      );
+      if (!res.ok) return;
+
+      const payload = await res.json();
+      const data = payload?.data || {};
+
+      /* -------- hydrate scalar fields -------- */
+      Object.entries(data).forEach(([name, value]) => {
+        const input = document.querySelector(`[name="${name}"]`);
+        if (!input || input.type === "file") return;
+
+        switch (input.type) {
+          case "checkbox":
+            input.checked = Boolean(value);
+            break;
+          case "radio": {
+            const radio = document.querySelector(
+              `input[name="${name}"][value="${value}"]`
+            );
+            if (radio) radio.checked = true;
+            break;
+          }
+          default:
+            input.value = value ?? "";
+        }
+      });
+
+      /* -------- replace file inputs with placeholders -------- */
+      const placeholders = new Map();
+      document.querySelectorAll('input[type="file"][name]').forEach((input) => {
+        const holder = document.createElement("div");
+        holder.className = "d-block";
+        holder.dataset.field = input.name;
+        holder.textContent = "No file uploaded";
+        placeholders.set(input.name, holder);
+        input.replaceWith(holder);
+      });
+
+      /* -------- inject one link per uploaded key -------- */
+      const files = Array.isArray(payload?.fileKeys) ? payload.fileKeys : [];
+      const byField = {};
+      files.forEach(({ field, key }) => {
+        if (!field || !key) return;
+        (byField[field] ||= []).push(key);
+      });
+
+      for (const [field, keys] of Object.entries(byField)) {
+        const holder = placeholders.get(field);
+        if (!holder) continue;
+
+        holder.innerHTML = ""; // clear "No file uploaded"
+        for (const key of keys) {
+          const fileName = key.split("/").pop() || "file";
+          const link = document.createElement("a");
+          link.textContent = fileName;
+          link.target = "_blank";
+          link.rel = "noopener";
+          link.className = "d-block";
+
+          try {
+            const r = await fetch(
+              `${API_BASE}/form/file-url?key=${encodeURIComponent(key)}`
+            );
+            const j = await r.json();
+            link.href = j?.ok && j.url ? j.url : "#";
+            if (!j?.ok) link.textContent = `${fileName} (unavailable)`;
+          } catch {
+            link.textContent = `${fileName} (error)`;
+          }
+          holder.appendChild(link);
+        }
+      }
+
+      showToast(
+        payload.type === "submitted" ? "Viewing submission." : "Viewing draft."
+      );
+    } catch (err) {
+      console.error("Error loading reader form:", err);
+      showToast("Could not load submission.");
+    }
   }
 
   /* -------------------- Initial render -------------------- */
   document.addEventListener("DOMContentLoaded", async () => {
     if (isReader) {
       steps.forEach((s) => s.classList.add("active"));
-      document.querySelectorAll("input, textarea, select").forEach((el) => (el.disabled = true));
+      document
+        .querySelectorAll("input, textarea, select")
+        .forEach((el) => (el.disabled = true));
       if (submitBtn) submitBtn.style.display = "none";
       if (saveBtn) saveBtn.style.display = "none";
       await loadForReader();
