@@ -1,3 +1,4 @@
+// backend/models/FormDraft.js
 import mongoose from "mongoose";
 
 const EMAIL_RX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -14,6 +15,7 @@ const formDraftSchema = new mongoose.Schema({
     match: EMAIL_RX,
     select: false,
   },
+  fileKeys: [{ field: String, key: String }],            // <- added to track multiple uploads
   lastActivityAt: { type: Date, default: Date.now },
   updatedAt: {
     type: Date,
@@ -22,10 +24,11 @@ const formDraftSchema = new mongoose.Schema({
   },
   finalizedAt: { type: Date },
 
-  // ← nuevos para control de envíos de mail de reanudación:
+  // new fields for resume email tracking
   lastResumeEmailAt: { type: Date },
   lastResumeEmailTo: { type: String, select: false },
 });
 
 const FormDraft = mongoose.model("FormDraft", formDraftSchema);
 export default FormDraft;
+

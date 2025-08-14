@@ -1,3 +1,4 @@
+
 // backend/routes/form.js
 import express from "express";
 import multer from "multer";
@@ -16,18 +17,18 @@ const upload = multer();
 router.get("/form/file-url", getFileUrl);
 
 // Presigned PUT URL for uploads
-router.get("/generate-upload-url", generateUploadUrl);
+router.get("/form/generate-upload-url", generateUploadUrl); // <- scope under /form
 
 // Draft save
-router.post("/save-draft", upload.none(), saveDraft);
+router.post("/form/save-draft", upload.none(), saveDraft);    // <- scoped path
 
 // Reader view
 router.get("/form/view", getViewData);
 
 // Final submit
 router.post(
-  "/submit-form",
-  (req, res, next) => upload.none()(req, res, next),
+  "/form/submit-form",
+  upload.none(),
   handleFormSubmission
 );
 

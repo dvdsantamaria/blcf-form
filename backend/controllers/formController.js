@@ -41,14 +41,18 @@ function getField(body, dottedPath) {
   }, body);
 }
 
+// Updated to handle single values or arrays of file keys
 function extractFileKeysFromBody(body) {
   const keys = [];
-  for (const [k, v] of Object.entries(body || {})) {
-    if (
-      typeof v === "string" &&
-      /submissions\/.+\/uploads\/.+\.(pdf|png|jpe?g|webp|heic)$/i.test(v)
-    ) {
-      keys.push({ field: k, key: v });
+  for (const [field, value] of Object.entries(body || {})) {
+    const candidates = Array.isArray(value) ? value : [value];
+    for (const v of candidates) {
+      if (
+        typeof v === "string" &&
+        /submissions\/.+\/uploads\/.+\.(pdf|png|jpe?g|webp|heic)$/i.test(v)
+      ) {
+        keys.push({ field, key: v });
+      }
     }
   }
   return keys;
@@ -134,14 +138,12 @@ export const saveDraft = async (req, res) => {
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
     const expiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
-    // Try to find an existing, unused resume token
     let rtDoc = await ResumeToken.findOne({
       submissionId: token,
       used: false,
     });
 
     if (rtDoc) {
-      // Extend its expiration
       await ResumeToken.updateOne(
         { submissionId: token, used: false },
         { expiresAt }
@@ -149,7 +151,6 @@ export const saveDraft = async (req, res) => {
       console.log("[save-draft][resume-token-extend]", { reqId, token });
     }
 
-    // Throttle re-sending the resume email to once per N hours
     const throttleHrs = Number(process.env.RESUME_EMAIL_THROTTLE_HOURS) || 24;
     const throttleMs = throttleHrs * 3600 * 1000;
     const draftRecord = await FormDraft.findOne({ token }).lean();
@@ -159,7 +160,6 @@ export const saveDraft = async (req, res) => {
     const shouldSend = email && Date.now() - lastSent > throttleMs;
 
     if (shouldSend) {
-      // Use existing token or generate a new one
       const rt = rtDoc?.resumeToken || genToken(24);
       if (!rtDoc) {
         await ResumeToken.create({
@@ -170,7 +170,6 @@ export const saveDraft = async (req, res) => {
         });
       }
 
-      // Build the resume link
       const base = BACKEND_BASE_URL || PUBLIC_BASE_URL || "";
       const exchangeUrl = `${base}/api/resume/exchange?rt=${encodeURIComponent(
         rt
@@ -182,7 +181,6 @@ export const saveDraft = async (req, res) => {
         <p><a href="${exchangeUrl}">${exchangeUrl}</a></p>
         <p>If you did not request this, ignore this email.</p>`;
 
-      // Send the email
       const mail = await sendHtmlEmail({
         to: email,
         subject,
@@ -199,7 +197,6 @@ export const saveDraft = async (req, res) => {
         id: mail.id,
       });
 
-      // Record when and to whom we sent the last resume email
       await FormDraft.updateOne(
         { token },
         { $set: { lastResumeEmailAt: new Date(), lastResumeEmailTo: email } }
@@ -210,10 +207,12 @@ export const saveDraft = async (req, res) => {
     return res.status(200).json({ ok: true, token, s3Key: currentKey, step });
   } catch (err) {
     console.error("save draft error:", { reqId, error: err?.message || err });
-    return res.status(500).json({ ok: false, error: "Internal Server Error" });
+    return res
+      .status(500)
+      .json({ ok: false, error: "Internal Server Error" });
   }
 };
-// ───────────────── SUBMIT (FINAL) ─────────────────
+
 // ───────────────── SUBMIT (FINAL) ─────────────────
 export const handleFormSubmission = async (req, res) => {
   const reqId = req.requestId || "-";
@@ -244,7 +243,11 @@ export const handleFormSubmission = async (req, res) => {
       fileKeys,
     };
 
-    console.log("[submit][begin]", { reqId, token, hasEmail: !!patientEmail });
+    console.log("[submit][begin]", {
+      reqId,
+      token,
+      hasEmail: !!patientEmail,
+    });
     await putJsonToS3(finalKey, payload, reqId);
 
     await FormSubmission.findOneAndUpdate(
@@ -274,8 +277,6 @@ export const handleFormSubmission = async (req, res) => {
       { upsert: true }
     );
 
-    // ── Notify admins only (reader link goes to admins, not the patient)
-    // ── Notify admins only (reader link goes to admins, not the patient)
     const notifyRaw = [
       process.env.SUBMISSION_NOTIFY_TO || "",
       process.env.ADMIN_NOTIFY_TO || "",
@@ -284,7 +285,6 @@ export const handleFormSubmission = async (req, res) => {
       .filter(Boolean)
       .join(",");
 
-    // admitir comas, punto y coma y saltos de línea/espacios
     const recipients = notifyRaw
       .split(/[,;\s]+/)
       .map((s) => s.trim())
@@ -292,46 +292,38 @@ export const handleFormSubmission = async (req, res) => {
 
     console.log("[submit][notify]", { reqId, notifyRaw, recipients });
 
-    if (recipients.length === 0) {
-      console.warn(
-        "[submit][notify] no recipients configured; skipping email",
-        {
-          reqId,
-        }
-      );
-    } else {
-      const emailTasks = [];
-      for (const to of recipients) {
-        console.log("[mail][send]", {
-          reqId,
-          kind: "submission.admin",
+    if (recipients.length) {
+      const emailTasks = recipients.map((to) =>
+        sendSubmissionMail({
           to,
-          subject: "BLCF – New grant application received",
-        });
-        emailTasks.push(
-          sendSubmissionMail({
-            to,
-            token,
-            role: "admin",
-            requestId: reqId,
-          })
-        );
-      }
+          token,
+          role: "admin",
+          requestId: reqId,
+        })
+      );
       const results = await Promise.all(emailTasks);
       console.log("[submit][mails]", {
         reqId,
         count: results.length,
         ids: results.map((r) => r?.id).filter(Boolean),
       });
+    } else {
+      console.warn(
+        "[submit][notify] no recipients configured; skipping email",
+        { reqId }
+      );
     }
 
     console.log("✅ Submission saved:", token, "(reqId:", reqId + ")");
     return res.status(200).json({ ok: true, token, s3Key: finalKey });
   } catch (err) {
     console.error("❌ submit error:", { reqId, error: err?.message || err });
-    return res.status(500).json({ ok: false, error: "Internal Server Error" });
+    return res
+      .status(500)
+      .json({ ok: false, error: "Internal Server Error" });
   }
 };
+
 // ───────────────── PRESIGNED URL ─────────────────
 export const generateUploadUrl = async (req, res) => {
   const reqId = req.requestId || "-";
@@ -353,7 +345,12 @@ export const generateUploadUrl = async (req, res) => {
     const iso = new Date().toISOString().replace(/[-:.TZ]/g, "");
     const key = `submissions/${token}/uploads/${iso}_${safeField}.${ext}`;
 
-    console.log("[S3][presign-put]", { reqId, token, key, contentType: type });
+    console.log("[S3][presign-put]", {
+      reqId,
+      token,
+      key,
+      contentType: type,
+    });
 
     const url = await getSignedUrl(
       s3,
@@ -422,10 +419,10 @@ export const getViewData = async (req, res) => {
         fileKeys: json.fileKeys || [],
       });
     } catch (_) {
-      // sigue a draft
+      // fallback to draft
     }
 
-    // 2) Draft actual
+    // 2) Draft
     const draftKey = `submissions/${token}/drafts/current.json`;
     const obj = await s3.send(
       new GetObjectCommand({ Bucket: BUCKET, Key: draftKey })
