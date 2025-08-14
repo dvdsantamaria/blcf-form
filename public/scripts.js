@@ -421,6 +421,8 @@
         .forEach((el) => (el.disabled = true));
       if (submitBtn) submitBtn.style.display = "none";
       if (saveBtn) saveBtn.style.display = "none";
+      document.getElementById("step6")?.classList.add("d-none");
+      document.querySelector(".buttons")?.classList.add("d-none");
       await loadForReader();
       return;
     }
