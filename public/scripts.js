@@ -324,8 +324,8 @@
       if (token) return token;
       const fd = new FormData();
       fd.append("step", currentStep);
-      const res = await fetch(`${API_BASE}/save-draft`, {
-        method: "POST",
+      const res = await fetch(`${API_BASE}/form/save-draft`, {
+                method: "POST",
         body: fd,
       });
       if (!res.ok) throw new Error(`save-draft ${res.status}`);
@@ -391,7 +391,7 @@
           try {
             const token = await ensureToken();
             const res = await fetch(
-              `${API_BASE}/generate-upload-url?field=${encodeURIComponent(
+              `${API_BASE}/form/generate-upload-url?field=${encodeURIComponent(
                 fieldName
               )}&token=${encodeURIComponent(token)}&type=${encodeURIComponent(
                 mime
@@ -424,39 +424,34 @@
     window.saveStep = async function saveStep() {
       clearAllInvalid();
       if (!validateDraftMin()) return;
-
+    
       const formData = new FormData(grantForm);
-      // replace any file entries with each key separately
+    
+      // sustituir los <input type="file"> por sus keys individuales
       document.querySelectorAll('input[type="file"]').forEach((input) => {
         if (formData.has(input.name)) formData.delete(input.name);
         if (input.dataset.s3key) {
-          input
-            .dataset.s3key
+          input.dataset.s3key
             .split(",")
             .forEach((key) => formData.append(input.name, key));
         }
       });
+    
       formData.append("step", currentStep);
       const existingToken = localStorage.getItem("draftToken");
       if (existingToken) formData.append("token", existingToken);
-
-      const payload = {};
-      formData.forEach((value, key) => {
-        payload[key] = value;
-      });
-
+    
       try {
-        const resp = await fetch(`${API_BASE}/save-draft`, {
+        const res = await fetch(`${API_BASE}/form/save-draft`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
+          body: formData,          // << FormData directo (sin JSON)
         });
-        if (!resp.ok) throw new Error(`save-draft ${resp.status}`);
-        const json = await resp.json();
-
+        if (!res.ok) throw new Error(`save-draft ${res.status}`);
+    
+        const json = await res.json();
         const tokenFromResp = json.token || existingToken;
         if (json.token) localStorage.setItem("draftToken", json.token);
-
+    
         console.log("✅ Draft saved:", tokenFromResp);
         showToast("Draft saved.");
       } catch (err) {
@@ -464,34 +459,37 @@
         showToast("Save draft failed.");
       }
     };
+    
 
     // Final submit
     grantForm?.addEventListener("submit", async (e) => {
       e.preventDefault();
       if (!validateAllBeforeSubmit()) return;
-
+    
       const formData = new FormData(grantForm);
-      // replace any file entries with each key separately
+    
+      // adjunta cada S3-key individual en lugar del File
       document.querySelectorAll('input[type="file"]').forEach((input) => {
         if (formData.has(input.name)) formData.delete(input.name);
         if (input.dataset.s3key) {
-          input
-            .dataset.s3key
+          input.dataset.s3key
             .split(",")
             .forEach((key) => formData.append(input.name, key));
         }
       });
+    
       const existingToken = localStorage.getItem("draftToken");
       if (existingToken) formData.append("token", existingToken);
-
+    
       try {
-        const res = await fetch(`${API_BASE}/submit-form`, {
+        const res = await fetch(`${API_BASE}/form/submit-form`, {
           method: "POST",
-          body: formData,
+          body: formData,          // ← FormData directo
         });
         if (!res.ok) throw new Error("Submit failed");
+    
         localStorage.removeItem("draftToken");
-        currentStep = steps.length - 1; // thank you page
+        currentStep = steps.length - 1; // thank-you page
         showStep(currentStep);
         showToast("Submission received.");
       } catch (err) {
