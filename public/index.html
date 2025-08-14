@@ -24,7 +24,6 @@
       <form id="grantForm">
         <!-- ===================== STEP 1 ===================== -->
         <div class="step active" id="step1">
-          <!-- How did you hear about us? (dropdown) -->
           <div class="mb-3">
             <label class="form-label">How did you hear about us?</label>
             <select class="form-select" name="referral.source">
@@ -236,14 +235,12 @@
         <div class="step" id="step3">
           <h2>NDIS and Therapy</h2>
 
-          <label class="form-label"
-            >Is your child an NDIS participant or eligible?</label
-          >
-          <input
-            class="form-control"
-            type="text"
-            name="ndis.participantEligible"
-          />
+          <label class="form-label">Is your child an NDIS participant or eligible?</label>
+          <select class="form-select" name="ndis.participantEligible">
+            <option value="">Select</option>
+            <option value="Yes">Yes</option>
+            <option value="No">No</option>
+          </select>
 
           <label class="form-label mt-2">If NO, why not?</label>
           <textarea
@@ -252,33 +249,13 @@
             name="ndis.notEligibleReason"
           ></textarea>
 
-          <label class="form-label mt-2"
-            >Upload latest NDIS communication</label
-          >
-          <input
-            class="form-control"
-            type="file"
-            name="docs.ndisCommunication"
-            accept=".pdf,.jpg,.jpeg,.png,.webp,.heic"
-          />
-
-          <label class="form-label mt-2"
-            >If YES but more support is needed, why?</label
-          >
-          <textarea
-            class="form-control"
-            rows="2"
-            name="ndis.moreSupportWhy"
-          ></textarea>
-
-          <label class="form-label mt-2"
-            >Support letter from health professional</label
-          >
+          <label class="form-label mt-2">Support letter from health professional</label>
           <input
             class="form-control"
             type="file"
             name="docs.supportLetterHealthProfessional"
             accept=".pdf,.jpg,.jpeg,.png,.webp,.heic"
+            multiple
           />
 
           <label class="form-label mt-2">Therapy/therapies to be funded</label>
@@ -288,9 +265,7 @@
             name="therapy.toBeFunded"
           ></textarea>
 
-          <label class="form-label mt-2"
-            >Therapy frequency or equipment required</label
-          >
+          <label class="form-label mt-2">Therapy frequency or equipment required</label>
           <textarea
             class="form-control"
             rows="2"
@@ -303,6 +278,15 @@
             rows="3"
             name="therapy.goals"
           ></textarea>
+
+          <label class="form-label mt-2">Ndis plan or goals</label>
+          <input
+            class="form-control"
+            type="file"
+            name="docs.ndisPlanOrGoals"
+            accept=".pdf,.jpg,.jpeg,.png,.webp,.heic"
+            multiple
+          />
 
           <label class="form-label mt-2">Impact if grant is not received</label>
           <textarea
@@ -317,14 +301,16 @@
             type="file"
             name="docs.diagnosisLetter"
             accept=".pdf,.jpg,.jpeg,.png,.webp,.heic"
+            multiple
           />
 
-          <label class="form-label mt-2">Additional letter (optional)</label>
+          <label class="form-label mt-2">Additional documentation</label>
           <input
             class="form-control"
             type="file"
             name="docs.additionalLetterOptional"
             accept=".pdf,.jpg,.jpeg,.png,.webp,.heic"
+            multiple
           />
         </div>
 
