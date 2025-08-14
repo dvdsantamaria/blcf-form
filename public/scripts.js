@@ -166,7 +166,7 @@
         label.innerHTML = `${label.innerHTML} <span class="text-muted">(optional)</span>`;
     });
 
-    Object.keys(STE P_REQUIRED).forEach((k) => {
+    Object.keys(STEP_REQUIRED).forEach((k) => {
       STEP_REQUIRED[k].forEach((name) => {
         if (OPTIONAL_FIELDS.has(name)) return;
         const el = elFor(name);
