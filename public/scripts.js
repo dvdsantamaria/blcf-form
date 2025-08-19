@@ -223,6 +223,91 @@ const elFor = (name) => document.querySelector(`[name="${name}"]`);
     })();
 })();
 
+/* -------------------- File helpers (existing uploads UI) -------------------- */
+const MAX_FILES_PER_FIELD = 5;
+
+function getExistingKeys(input) {
+  return (input.dataset.s3keys || input.dataset.s3key || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function setKeys(input, keys) {
+  const uniq = [...new Set((keys || []).filter(Boolean))].slice(
+    0,
+    MAX_FILES_PER_FIELD
+  );
+  const joined = uniq.join(",");
+  input.dataset.s3keys = joined;
+  input.dataset.s3key = joined; // compat
+  renderExistingFiles(input, uniq);
+}
+
+function renderExistingFiles(input, keys) {
+  let list = input.nextElementSibling;
+  if (!list || !list.classList || !list.classList.contains("uploaded-list")) {
+    list = document.createElement("div");
+    list.className = "uploaded-list mt-1";
+    input.insertAdjacentElement("afterend", list);
+  }
+  list.innerHTML = "";
+  if (!Array.isArray(keys) || !keys.length) {
+    list.style.display = "none";
+    return;
+  }
+  list.style.display = "block";
+
+  keys.forEach((k) => {
+    const wrap = document.createElement("div");
+    wrap.className = "d-flex align-items-center gap-2 mb-1";
+
+    const name = document.createElement("span");
+    name.className = "badge bg-secondary";
+    name.textContent = k.split("/").pop() || "file";
+
+    const view = document.createElement("a");
+    view.textContent = "view";
+    view.className = "small";
+    view.target = "_blank";
+    view.rel = "noopener";
+
+    // Intento de link firmado (si falla, simplemente muestra “uploaded”)
+    fetch(`${API_BASE}/form/file-url?key=${encodeURIComponent(k)}`, {
+      credentials: "include",
+      headers: { Accept: "application/json" },
+    })
+      .then((r) => r.json())
+      .then((j) => {
+        if (j?.ok && j.url) {
+          view.href = j.url;
+        } else {
+          view.href = "#";
+          view.textContent = "uploaded";
+          view.removeAttribute("target");
+        }
+      })
+      .catch(() => {
+        view.href = "#";
+        view.textContent = "uploaded";
+        view.removeAttribute("target");
+      });
+
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "btn btn-sm btn-outline-danger";
+    removeBtn.textContent = "Remove";
+    removeBtn.addEventListener("click", () => {
+      const remain = getExistingKeys(input).filter((x) => x !== k);
+      setKeys(input, remain);
+      showToast("File removed from draft.");
+    });
+
+    wrap.append(name, view, removeBtn);
+    list.appendChild(wrap);
+  });
+}
+
 /* -------------------- NDIS show/hide -------------------- */
 function initNdisToggle() {
   const ndisSelect = document.getElementById("ndisEligible");
@@ -458,6 +543,11 @@ async function loadForReader() {
     files.forEach(({ field, key }) => {
       if (!field || !key) return;
       (byField[field] ||= []).push(key);
+    });
+    Object.entries(byField).forEach(([field, keys]) => {
+      const input = document.querySelector(`input[type="file"][name="${field}"]`);
+      if (!input) return;
+      setKeys(input, keys); // set dataset + render listado
     });
 
     for (const [field, keys] of Object.entries(byField)) {
@@ -918,16 +1008,23 @@ async function sendResumeEmailOnce(email, token) {
   // --- Upload multi-archivo (hasta 5) ---
   document.querySelectorAll('input[type="file"]').forEach((input) => {
     input.addEventListener("change", async () => {
-      const files = Array.from(input.files || []);
-      delete input.dataset.s3key;
-      delete input.dataset.s3keys;
+      let files = Array.from(input.files || []);
       if (!files.length) return;
-      if (files.length > 5) {
-        showToast("You can upload up to 5 files only.");
+  
+      const existing = getExistingKeys(input);
+      const remaining = Math.max(0, MAX_FILES_PER_FIELD - existing.length);
+      if (remaining <= 0) {
+        showToast(`You already have ${MAX_FILES_PER_FIELD} files uploaded for this field.`);
         input.value = "";
         return;
       }
-
+      if (files.length > remaining) {
+        files = files.slice(0, remaining);
+        showToast(
+          `You can add ${remaining} more file${remaining > 1 ? "s" : ""} (max ${MAX_FILES_PER_FIELD} total).`
+        );
+      }
+  
       const fieldName = input.name;
       const mimeMap = {
         pdf: "application/pdf",
@@ -938,54 +1035,65 @@ async function sendResumeEmailOnce(email, token) {
         heic: "image/heic",
         heif: "image/heic",
       };
-      const s3keys = [];
-
+      const newKeys = [];
+  
       for (const file of files) {
         const ext = (file.name.split(".").pop() || "").toLowerCase();
         const mime = file.type || mimeMap[ext] || "";
-        if (!mime) { showToast("Unsupported file type."); return; }
-
+        if (!mime) {
+          showToast("Unsupported file type.");
+          input.value = "";
+          return;
+        }
+  
         try {
           const token = await ensureToken();
-
+  
           // intento consistente primero
           let presign;
           try {
             const r = await fetch(
-              `${ENDPOINTS.uploadUrl}?field=${encodeURIComponent(fieldName)}&token=${encodeURIComponent(token)}&type=${encodeURIComponent(mime)}`
+              `${API_BASE}/form/generate-upload-url?field=${encodeURIComponent(
+                fieldName
+              )}&token=${encodeURIComponent(token)}&type=${encodeURIComponent(
+                mime
+              )}`,
+              { headers: { Accept: "application/json" } }
             );
             if (r.ok) presign = await r.json();
           } catch {}
-
+  
           // si falla, uso flexible
           if (!presign || !presign.url || !presign.key) {
             presign = await getSignedUrlFlexible(fieldName, token, mime);
           }
-
+  
           const up = await fetch(presign.url, {
             method: "PUT",
             headers: { "Content-Type": mime },
             body: file,
           });
           if (!up.ok) throw new Error("Upload failed");
-          s3keys.push(presign.key);
+          newKeys.push(presign.key);
         } catch (err) {
           console.error(err);
           showToast("Upload error.");
+          input.value = "";
           return;
         }
       }
-
-      if (s3keys.length) {
-        // guardamos en ambos por compatibilidad
-        input.dataset.s3keys = s3keys.join(",");
-        input.dataset.s3key = s3keys.join(",");
+  
+      if (newKeys.length) {
+        const merged = [...existing, ...newKeys];
+        setKeys(input, merged); // persiste dataset + render
         showToast("Files uploaded.");
       }
+  
+      // limpiar selección del input (permite re-subir mismo nombre)
+      input.value = "";
     });
   });
 
-  // --- Guardar borrador ---
   // --- Guardar borrador ---
 window.saveStep = async function saveStep() {
   if (!validateDraftMin()) return;
