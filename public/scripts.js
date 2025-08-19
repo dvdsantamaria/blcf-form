@@ -554,37 +554,19 @@ function initNdisToggle() {
   
       const res = await fetch(
         `${API_BASE}/resume/get-draft?token=${encodeURIComponent(token)}`,
-        { credentials: "include" }
+        { credentials: "include", headers: { Accept: "application/json" } }
       );
-      if (!res.ok) {
-        console.warn("reader view failed", res.status);
-        return;
-      }
+      if (!res.ok) { console.warn("reader view failed", res.status); return; }
   
       const payload = await res.json().catch(() => ({}));
+  
+      // shape tolerante + flatten
       const raw =
         payload?.data ??
         payload?.fields ??
         payload?.form ??
         payload?.record ??
-        (typeof payload === "object" ? payload : {}) ?? {};
-  
-      // ------------ hidratar escalares (no tocar file inputs) ------------
-      Object.entries(raw).forEach(([name, value]) => {
-        const input = document.querySelector(`[name="${name}"]`);
-        if (!input || input.type === "file") return;
-        if (input.type === "checkbox") input.checked = Boolean(value);
-        else if (input.type === "radio") {
-          const radio = document.querySelector(
-            `input[name="${name}"][value="${value}"]`
-          );
-          if (radio) radio.checked = true;
-        } else {
-          input.value = value ?? "";
-        }
-      });
-  
-      // ------------ flatten local (por si viene anidado) ------------
+        (typeof payload === "object" ? payload : {});
       const flat = (obj, prefix = "", out = {}) => {
         for (const [k, v] of Object.entries(obj || {})) {
           const key = prefix ? `${prefix}.${k}` : k;
@@ -593,69 +575,75 @@ function initNdisToggle() {
         }
         return out;
       };
-      const flatData = flat(raw);
+      const data = flat(raw);
   
-      // ------------ junte de keys por campo (fileKeys[] y/o dentro del draft) ------------
-      const byField = collectFileKeysByField(payload, flatData);
+      // 1) Hidratar escalares (no tocar file inputs)
+      Object.entries(data).forEach(([name, value]) => {
+        const input = document.querySelector(`[name="${name}"]`);
+        if (!input || input.type === "file") return;
   
-      // ------------ reemplazar inputs por “placeholders” solo ahora ------------
-      const holders = new Map();
-      document.querySelectorAll('input[type="file"][name]').forEach((input) => {
-        const holder = document.createElement("div");
-        holder.className = "uploaded-list mt-1";
-        holder.dataset.field = input.name;
-        holder.textContent = byField[input.name]?.length ? "" : "No file uploaded";
-        input.replaceWith(holder);
-        holders.set(input.name, holder);
+        if (input.type === "checkbox") {
+          input.checked = Boolean(value);
+        } else if (input.type === "radio") {
+          const r = document.querySelector(`input[name="${name}"][value="${value}"]`);
+          if (r) r.checked = true;
+        } else {
+          input.value = value ?? "";
+        }
       });
   
-      // ------------ poblar links firmados (o “uploaded”) ------------
-      for (const [field, keys] of Object.entries(byField)) {
-        const holder = holders.get(field);
-        if (!holder) continue;
-        holder.innerHTML = "";
+      // 2) Recolectar keys desde payload.fileKeys y desde los campos del draft
+      const byField = collectFileKeysByField(payload, data);
   
-        for (const key of keys) {
-          const row = document.createElement("div");
-          row.className = "d-flex align-items-center gap-2 mb-1";
+      // 3) Reemplazar cada input file por un placeholder renderizando la lista
+      document.querySelectorAll('input[type="file"][name]').forEach((input) => {
+        const field = input.name;
+        const keys = byField[field] || [];
   
-          const badge = document.createElement("span");
-          badge.className = "badge bg-secondary";
-          badge.textContent = key.split("/").pop() || "file";
+        const holder = document.createElement("div");
+        holder.className = "uploaded-list mt-1";
+        if (!keys.length) {
+          holder.textContent = "No file uploaded";
+        } else {
+          keys.forEach(async (k) => {
+            const wrap = document.createElement("div");
+            wrap.className = "d-flex align-items-center gap-2 mb-1";
   
-          const link = document.createElement("a");
-          link.textContent = "view";
-          link.className = "small";
-          link.target = "_blank";
-          link.rel = "noopener";
+            const name = document.createElement("span");
+            name.className = "badge bg-secondary";
+            name.textContent = k.split("/").pop() || "file";
   
-          try {
-            const r = await fetch(
-              `${API_BASE}/form/file-url?key=${encodeURIComponent(key)}`,
-              { credentials: "include", headers: { Accept: "application/json" } }
-            );
-            const j = await r.json().catch(() => ({}));
-            if (j?.ok && j.url) {
-              link.href = j.url;
-            } else {
-              link.href = "#";
-              link.textContent = "uploaded";
-              link.removeAttribute("target");
+            const view = document.createElement("a");
+            view.textContent = "view";
+            view.className = "small";
+            view.target = "_blank";
+            view.rel = "noopener";
+  
+            try {
+              const r = await fetch(
+                `${API_BASE}/form/file-url?key=${encodeURIComponent(k)}`,
+                { credentials: "include", headers: { Accept: "application/json" } }
+              );
+              const j = await r.json().catch(() => ({}));
+              if (j?.ok && j.url) view.href = j.url;
+              else { view.href = "#"; view.textContent = "uploaded"; view.removeAttribute("target"); }
+            } catch {
+              view.href = "#"; view.textContent = "uploaded"; view.removeAttribute("target");
             }
-          } catch {
-            link.href = "#";
-            link.textContent = "uploaded";
-            link.removeAttribute("target");
-          }
   
-          row.append(badge, link);
-          holder.appendChild(row);
+            wrap.append(name, view);
+            holder.appendChild(wrap);
+          });
         }
-      }
   
-      showToast(
-        payload.type === "submitted" ? "Viewing submission." : "Viewing draft."
-      );
+        input.replaceWith(holder);
+      });
+  
+      // 4) Aplicar toggles dependientes y extras
+      initNdisToggle();     // revela .yes-only / .no-only según el valor hidratado
+      ensureAgeFromDob();   // por si hay DOB
+  
+      showToast(payload.type === "submitted" ? "Viewing submission." : "Viewing draft.");
     } catch (err) {
       console.error("Error loading reader form:", err);
       showToast("Could not load submission.");
@@ -1292,10 +1280,12 @@ window.saveStep = async function saveStep() {
 document.addEventListener("DOMContentLoaded", async () => {
   if (isReader) {
     showAllReaderMode();
+    await loadForReader();  // hidrata primero
+    // deshabilitar después de hidratar para no interferir con los toggles
     document.querySelectorAll("input, textarea, select").forEach(el => el.disabled = true);
-    await loadForReader();
     return;
   }
+
 
   const params = new URLSearchParams(location.search);
   const rt = params.get("rt");
