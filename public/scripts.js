@@ -177,19 +177,29 @@
     });
   })();
 
-  /* -------------------- NDIS show/hide -------------------- */
-  const ndisSelect = elFor("ndis.participantEligible");
-  function toggleNdisFields() {
-    const yes = ndisSelect && ndisSelect.value === "Yes";
+function initNdisToggle() {
+  const ndisSelect = document.getElementById("ndisEligible"); // usa el ID
+  if (!ndisSelect) return;                                    
+
+  const toggle = () => {
+    const yes = ndisSelect.value === "Yes";
     document
       .querySelectorAll(".yes-only")
       .forEach((el) => (el.style.display = yes ? "" : "none"));
     document
       .querySelectorAll(".no-only")
       .forEach((el) => (el.style.display = yes ? "none" : ""));
-  }
-  ndisSelect?.addEventListener("change", toggleNdisFields);
-  toggleNdisFields();
+  };
+
+  ndisSelect.addEventListener("change", toggle);
+  toggle(); // arranque coherente
+}
+
+/* --- al final del listener de DOMContentLoaded --- */
+document.addEventListener("DOMContentLoaded", async () => {
+  /* …tu código existente… */
+  initNdisToggle();   //  ←  AGREGÁ ESTA LÍNEA
+});
 
   /* -------------------- Age autofill -------------------- */
   const parseYMD = (s) => {
