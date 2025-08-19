@@ -15,6 +15,9 @@
   const saveBtn = document.getElementById("saveDraftBtn");
   const grantForm = document.getElementById("grantForm");
 
+  saveBtn?.setAttribute("type", "button");
+submitBtn?.setAttribute("type", "submit");
+
   /* -------------------- Optional fields -------------------- */
 const OPTIONAL_FIELDS = new Set([
   "docs.diagnosisLetter",
@@ -1067,29 +1070,46 @@ async function sendResumeEmailOnce(email, token) {
     showToast("Resume link copied to clipboard.");
   } catch {}
 }
+let _tokenPromise = null;
 
-  async function ensureToken() {
-    let token = localStorage.getItem("draftToken");
-    if (token) return token;
 
-    // intento directo al endpoint consistente
+async function ensureToken() {
+  // 1) si ya hay token, usarlo
+  const existing = localStorage.getItem("draftToken");
+  if (existing) return existing;
+
+  // 2) si ya hay una creación en curso, esperar esa
+  if (_tokenPromise) return _tokenPromise;
+
+  // 3) crear UNA sola vez
+  const make = async () => {
     const fd = new FormData();
     fd.append("step", currentStep);
+
     try {
-      const res = await fetch(ENDPOINTS.saveDraft, { method: "POST", body: fd });
+      const res = await fetch(`${API_BASE}/form/save-draft`, {
+        method: "POST",
+        body: fd,
+      });
       if (res.ok) {
-        token = (await res.json()).token;
-        if (token) localStorage.setItem("draftToken", token);
-        return token;
+        const j = await res.json().catch(() => ({}));
+        if (j?.token) {
+          localStorage.setItem("draftToken", j.token);
+          return j.token;
+        }
       }
     } catch {}
 
     // fallback flexible
     const { json } = await trySaveDraftFlexible(fd);
-    token = json?.token;
-    if (token) localStorage.setItem("draftToken", token);
-    return token;
-  }
+    const t = json?.token || null;
+    if (t) localStorage.setItem("draftToken", t);
+    return t;
+  };
+
+  _tokenPromise = make().finally(() => (_tokenPromise = null));
+  return _tokenPromise;
+}
 
   function validateDraftMin() {
     const missing = [];
@@ -1202,62 +1222,95 @@ async function sendResumeEmailOnce(email, token) {
     });
   });
 
-  // --- Guardar borrador ---
+// --- Guardar borrador (single-flight, sin duplicados) ---
+let _savingDraft = false;
+let _savingPromise = null;
+
 window.saveStep = async function saveStep() {
+  if (_savingDraft) return _savingPromise; // evita doble click / llamadas concurrentes
   if (!validateDraftMin()) return;
 
   const formEl = document.getElementById("grantForm");
-  const formData = new FormData(formEl);
+  const saveButton = document.getElementById("saveDraftBtn");
 
-  // reemplaza Files por sus S3 keys (una entrada por key)
-  document.querySelectorAll('input[type="file"]').forEach((input) => {
-    if (formData.has(input.name)) formData.delete(input.name);
-    const keys = (input.dataset.s3keys || input.dataset.s3key || "")
-      .split(",").map((s) => s.trim()).filter(Boolean);
-    keys.forEach((k) => formData.append(input.name, k));
-  });
+  // lock UI
+  let originalText;
+  if (saveButton) {
+    originalText = saveButton.textContent;
+    saveButton.disabled = true;
+    saveButton.setAttribute("aria-busy", "true");
+    saveButton.textContent = "Saving…";
+  }
 
-  formData.append("step", currentStep);
-  const existingToken = localStorage.getItem("draftToken");
-  if (existingToken) formData.append("token", existingToken);
+  const run = async () => {
+    // construir FormData
+    const formData = new FormData(formEl);
 
-  let tokenForEmail = existingToken || null;
-
-  // 1) intento directo al endpoint principal
-  try {
-    const res = await fetch(`${API_BASE}/form/save-draft`, {
-      method: "POST",
-      body: formData
+    // reemplaza Files por sus S3 keys (una entrada por key)
+    document.querySelectorAll('input[type="file"][name]').forEach((input) => {
+      if (formData.has(input.name)) formData.delete(input.name);
+      const keys = (input.dataset.s3keys || input.dataset.s3key || "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      keys.forEach((k) => formData.append(input.name, k));
     });
-    if (res.ok) {
-      const j = await res.json();
-      if (j.token) {
-        localStorage.setItem("draftToken", j.token);
-        tokenForEmail = j.token;
-      }
-      showToast("Draft saved.");
-    } else {
-      throw new Error(`save-draft ${res.status}`);
-    }
-  } catch {
-    // 2) fallbacks flexibles (JSON/FormData + rutas alternativas)
+
+    formData.append("step", currentStep);
+    const existingToken = localStorage.getItem("draftToken");
+    if (existingToken) formData.append("token", existingToken);
+
+    let tokenForEmail = existingToken || null;
+
     try {
-      const { json } = await trySaveDraftFlexible(formData);
-      if (json?.token) {
-        localStorage.setItem("draftToken", json.token);
-        tokenForEmail = json.token;
+      // 1) intento directo al endpoint principal
+      try {
+        const res = await fetch(`${API_BASE}/form/save-draft`, {
+          method: "POST",
+          body: formData,
+        });
+        if (!res.ok) throw new Error(`save-draft ${res.status}`);
+        const j = await res.json().catch(() => ({}));
+        if (j?.token) {
+          localStorage.setItem("draftToken", j.token);
+          tokenForEmail = j.token;
+        }
+      } catch {
+        // 2) fallbacks flexibles (JSON/FormData + rutas alternativas)
+        const { json } = await trySaveDraftFlexible(formData);
+        if (json?.token) {
+          localStorage.setItem("draftToken", json.token);
+          tokenForEmail = json.token;
+        }
       }
+
       showToast("Draft saved.");
+
+      // Enviar mail una sola vez por email (dedupe interno por email+token)
+      const emailVal =
+        (document.querySelector('[name="parent1.email"]')?.value || "").trim();
+      await sendResumeEmailOnce(
+        emailVal,
+        tokenForEmail || localStorage.getItem("draftToken")
+      );
     } catch (err) {
       console.error("save-draft error:", err);
       showToast("Save draft failed.");
-      return;
+    } finally {
+      // unlock UI
+      if (saveButton) {
+        saveButton.disabled = false;
+        saveButton.removeAttribute("aria-busy");
+        if (originalText) saveButton.textContent = originalText;
+      }
+      _savingDraft = false;
+      _savingPromise = null;
     }
-  }
+  };
 
-  // ---- Enviar mail una sola vez por email (si hay email válido)
-  const emailVal = (document.querySelector('[name="parent1.email"]')?.value || "").trim();
-  await sendResumeEmailOnce(emailVal, tokenForEmail || localStorage.getItem("draftToken"));
+  _savingDraft = true;
+  _savingPromise = run();
+  return _savingPromise;
 };
 
   // --- Envío final ---
