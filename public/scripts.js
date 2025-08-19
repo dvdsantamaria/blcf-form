@@ -404,7 +404,6 @@ function initNdisToggle() {
   }
 
   /* -------------------- Reader: load & hydrate form -------------------- */
-  /* -------------------- Reader: load & hydrate form -------------------- */
 async function loadForReader() {
   try {
     const qs = new URLSearchParams(location.search);
@@ -412,11 +411,13 @@ async function loadForReader() {
     if (!token) return;
 
     const res = await fetch(
-      `${API_BASE}/form/view?token=${encodeURIComponent(token)}`,
+      `${API_BASE}/resume/get-draft?token=${encodeURIComponent(token)}`,
       { credentials: "include" }
     );
-    if (!res.ok) { console.warn("reader view failed", res.status); return; }
-
+    if (!res.ok) { 
+      console.warn("reader view failed", res.status); 
+      return; 
+    }
     const payload = await res.json().catch(() => ({}));
     const data =
       payload?.data ??
@@ -600,25 +601,41 @@ async function hydrateFromTokenEdit(token) {
       console.warn("resume view error", e);
     }
   }
-  if (!payload) { console.warn("resume view not available"); return; }
-
+  if (!payload) { 
+    console.warn("resume view not available"); 
+    return; 
+  }
+  
   // aplanado flexible (por si viene anidado)
   const flatten = (obj, prefix = "", out = {}) => {
-    for (const [k, v] of Object.entries(obj || {})) {
-      const key = prefix ? `${prefix}.${k}` : k;
-      if (v && typeof v === "object" && !Array.isArray(v)) flatten(v, key, out);
-      else out[key] = v;
+    try {
+      for (const [k, v] of Object.entries(obj || {})) {
+        const key = prefix ? `${prefix}.${k}` : k;
+        if (v && typeof v === "object" && !Array.isArray(v)) {
+          flatten(v, key, out);
+        } else {
+          out[key] = v;
+        }
+      }
+    } catch (err) {
+      console.error("flatten error:", err, obj);
     }
     return out;
   };
-
+  
+  // tolerancia a distintos "shapes"
   const raw =
     payload?.data ??
     payload?.fields ??
     payload?.form ??
     payload?.record ??
-    payload;
+    (typeof payload === "object" ? payload : {});
+  
+  // debug para ver qué llegó
+  console.log("hydrate raw draft:", raw);
+  
   const data = flatten(raw);
+  console.log("flattened draft data:", data);
 
   // hidratar escalares
   Object.entries(data).forEach(([name, value]) => {
@@ -649,6 +666,7 @@ async function hydrateFromTokenEdit(token) {
   // re-aplicar NDIS toggle
   document.getElementById("ndisEligible")
     ?.dispatchEvent(new Event("change", { bubbles: true }));
+    ensureAgeFromDob();
 }
 
   /* -------------------- Draft logic (edit mode) -------------------- */
@@ -763,22 +781,22 @@ async function sendResumeEmailOnce(email, token) {
   if (!token) return;
 
   const cleanEmail = String(email).trim();
-  const key = `resumeSent:${cleanEmail}`;
-  if (localStorage.getItem(key)) return; // dedupe
+  const key = `resumeSent:${cleanEmail}:${token}`;
+    if (localStorage.getItem(key)) return; // dedupe
 
   const resumeUrlStr =
     `${location.origin}${location.pathname}?token=${encodeURIComponent(token)}`;
 
-  // 1) Endpoints dedicados (si existen)
-  const dedicated = [
-    `${API_BASE}/resume/send`,
-    `${API_BASE}/form/resume-send`,
-    `/api/resume/send`,
-    `/resume/send`,
-    // extras habituales
-    `${API_BASE}/form/send-resume`,
-    `${API_BASE}/form/send-draft-link`,
-  ];
+   const dedicated = [
+       `${API_BASE}/resume/send-link`,     
+       `${API_BASE}/resume/send`,            
+       `${API_BASE}/form/resume-send`,     
+       `/api/resume/send-link`,
+       `/api/resume/send`,
+       `/resume/send`,
+       `${API_BASE}/form/send-resume`,
+       `${API_BASE}/form/send-draft-link`,
+     ];
 
   const jsonPayload = { email: cleanEmail, token, resumeUrl: resumeUrlStr };
   const fdPayload = new FormData();
