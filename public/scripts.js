@@ -220,19 +220,19 @@
   function initNdisToggle() {
     const ndisSelect = document.getElementById("ndisEligible");
     if (!ndisSelect) return;
-
+  
     const toggle = () => {
       const yes = ndisSelect.value === "Yes";
       document
         .querySelectorAll(".yes-only")
-        .forEach((el) => (el.style.display = yes ? "" : "none"));
+        .forEach((el) => (el.style.display = yes ? "block" : "none"));
       document
         .querySelectorAll(".no-only")
-        .forEach((el) => (el.style.display = yes ? "none" : ""));
+        .forEach((el) => (el.style.display = yes ? "none" : "block"));
     };
-
+  
     ndisSelect.addEventListener("change", toggle);
-    toggle();
+    toggle(); // estado inicial
   }
 
   /* -------------------- Age autofill (editable) -------------------- */
