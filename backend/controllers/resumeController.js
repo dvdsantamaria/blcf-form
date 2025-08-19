@@ -144,7 +144,7 @@ export async function exchangeResumeToken(req, res) {
 
     await ResumeToken.updateOne({ resumeToken: rt }, { $set: { used: true } });
 
-    /* ---- siempre set cookie (útil para navegación clásica) ---- */
+    // siempre set cookie (útil para navegación clásica)
     res.cookie("resume", doc.submissionId, {
       httpOnly: true,
       secure: true,
@@ -153,22 +153,18 @@ export async function exchangeResumeToken(req, res) {
       path: "/",
     });
 
-    /* ---- responde según quién lo pide ---- */
+    // decide respuesta: JSON (fetch) o redirect (navegación normal)
     const wantsJson =
       req.xhr ||
-      req.headers.accept?.includes("application/json") ||
+      (req.headers.accept && req.headers.accept.includes("application/json")) ||
       req.headers["sec-fetch-mode"] === "cors" ||
       req.query.json === "1";
 
     if (wantsJson) {
-      // llamado vía fetch → devolver JSON para que el frontend hidrate
       return res.json({ ok: true, token: doc.submissionId });
     }
 
-    // navegación directa → redirigir al sitio público
-    const redirectTo = PUBLIC_BASE_URL
-      ? `${PUBLIC_BASE_URL}/?resumed=1`
-      : "/";
+    const redirectTo = PUBLIC_BASE_URL ? `${PUBLIC_BASE_URL}/?resumed=1` : "/";
     return res.redirect(302, redirectTo);
   } catch (err) {
     console.error("exchangeResumeToken error:", err);

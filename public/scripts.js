@@ -519,50 +519,33 @@ function flatten(obj, prefix = "", out = {}) {
   return out;
 }
 /* ---------- resume-exchange → hydrate ---------- */
-/* ---------- resume-exchange → hydrate ---------- */
 async function resumeExchangeAndHydrate(rt) {
   if (!rt) return;
-
   try {
-    /* 1. canjeamos el rt por un token “normal”  -------------------- */
-    const url = `${API_BASE}/resume/exchange?rt=${encodeURIComponent(rt)}`;
-    const res = await fetch(url, {
+    const res = await fetch(`${API_BASE}/resume/exchange?rt=${encodeURIComponent(rt)}`, {
       credentials: "include",
-      headers: { Accept: "application/json" },   // fuerza respuesta JSON
+      headers: { Accept: "application/json" },
     });
 
-    /* --- A) el backend devolvió JSON directo --------------------- */
     if (res.ok && res.headers.get("content-type")?.includes("json")) {
       const j = await res.json().catch(() => ({}));
       const token = j?.token || j?.draftToken || j?.id;
-      if (token) {
-        localStorage.setItem("draftToken", token);
-        await hydrateFromTokenEdit(token);
-      } else {
-        console.warn("exchange response without token", j);
-        showToast("Invalid resume link.");
-        return;
-      }
+      if (!token) { showToast("Invalid resume link."); return; }
+      localStorage.setItem("draftToken", token);
+      await hydrateFromTokenEdit(token);
     } else {
-      /* --- B) el backend redirigió → tenemos la cookie “resume” ---- */
-      console.info("resume-exchange returned HTML/redirect, using cookie");
-
+      // Fue redirect → usamos cookie
       const who = await fetch(`${API_BASE}/resume/whoami`, {
         credentials: "include",
         headers: { Accept: "application/json" },
       }).then(r => r.json()).catch(() => ({}));
-
       const token = who?.token;
-      if (!token) {
-        console.warn("whoami: no token in cookie");
-        showToast("Could not resume draft.");
-        return;
-      }
+      if (!token) { showToast("Could not resume draft."); return; }
       localStorage.setItem("draftToken", token);
       await hydrateFromTokenEdit(token);
     }
 
-    /* 2. limpiamos la URL (quitamos rt=) sin recargar la página ---- */
+    // limpiar rt= de la URL
     const clean = new URL(location.href);
     clean.searchParams.delete("rt");
     history.replaceState({}, "", clean.toString());
@@ -571,35 +554,64 @@ async function resumeExchangeAndHydrate(rt) {
     showToast("Resume link error.");
   }
 }
+
+async function hydrateFromCookieIfAny() {
+  try {
+    const who = await fetch(`${API_BASE}/resume/whoami`, {
+      credentials: "include",
+      headers: { Accept: "application/json" },
+    }).then(r => r.json()).catch(() => ({}));
+
+    const token = who?.token;
+    if (!token) return false;
+    localStorage.setItem("draftToken", token);
+    await hydrateFromTokenEdit(token);
+
+    // limpiar ?resumed=1 si vino en la URL
+    const url = new URL(location.href);
+    if (url.searchParams.has("resumed")) {
+      url.searchParams.delete("resumed");
+      history.replaceState({}, "", url.toString());
+    }
+    return true;
+  } catch (e) {
+    console.warn("hydrateFromCookieIfAny error", e);
+    return false;
+  }
+}
 /* ---------- Edit-mode: hidratar formulario usando el token ---------- */
 async function hydrateFromTokenEdit(token) {
   const qs = `token=${encodeURIComponent(token)}`;
   const urls = [
-    `${API_BASE}/form/view?${qs}`,
-    `/api/form/view?${qs}`,
-    `/form/view?${qs}`,
+    `${API_BASE}/resume/get-draft?${qs}`, // ← PRIORIDAD
+    `${API_BASE}/form/view?${qs}`,        // fallback 1
+    `/api/form/view?${qs}`,               // fallback 2
+    `/form/view?${qs}`,                   // fallback 3
   ];
 
   let payload = null;
   for (const url of urls) {
     try {
       const r = await fetch(url, { credentials: "include" });
-      if (!r.ok) {
-        console.warn("resume view failed", r.status, url);
-        continue;
-      }
+      if (!r.ok) { console.warn("resume view failed", r.status, url); continue; }
       payload = (await r.json().catch(() => ({}))) || {};
       break;
     } catch (e) {
       console.warn("resume view error", e);
     }
   }
-  if (!payload) {
-    console.warn("resume view not available");
-    return;
-  }
+  if (!payload) { console.warn("resume view not available"); return; }
 
-  // admite varios shapes y aplana
+  // aplanado flexible (por si viene anidado)
+  const flatten = (obj, prefix = "", out = {}) => {
+    for (const [k, v] of Object.entries(obj || {})) {
+      const key = prefix ? `${prefix}.${k}` : k;
+      if (v && typeof v === "object" && !Array.isArray(v)) flatten(v, key, out);
+      else out[key] = v;
+    }
+    return out;
+  };
+
   const raw =
     payload?.data ??
     payload?.fields ??
@@ -608,45 +620,34 @@ async function hydrateFromTokenEdit(token) {
     payload;
   const data = flatten(raw);
 
-  /* ----------- hidratar campos escalares ----------- */
+  // hidratar escalares
   Object.entries(data).forEach(([name, value]) => {
     const input = document.querySelector(`[name="${name}"]`);
     if (!input || input.type === "file") return;
-
-    switch (input.type) {
-      case "checkbox":
-        input.checked = Boolean(value);
-        break;
-      case "radio": {
-        const radio = document.querySelector(
-          `input[name="${name}"][value="${value}"]`
-        );
-        if (radio) radio.checked = true;
-        break;
-      }
-      default:
-        input.value = value ?? "";
+    if (input.type === "checkbox") input.checked = Boolean(value);
+    else if (input.type === "radio") {
+      const radio = document.querySelector(`input[name="${name}"][value="${value}"]`);
+      if (radio) radio.checked = true;
+    } else {
+      input.value = value ?? "";
     }
   });
 
-  /* ----------- hidratar archivos (mantener input editable) ----------- */
+  // hidratar archivos (mantener input editable)
   const files = Array.isArray(payload?.fileKeys) ? payload.fileKeys : [];
   const byField = {};
-  files.forEach(({ field, key }) => {
-    if (!field || !key) return;
-    (byField[field] ||= []).push(key);
-  });
+  files.forEach(({ field, key }) => { if (field && key) (byField[field] ||= []).push(key); });
   Object.entries(byField).forEach(([field, keys]) => {
     const input = document.querySelector(`input[type="file"][name="${field}"]`);
-    if (!input) return;
-    const joined = keys.join(",");
-    input.dataset.s3keys = joined;
-    input.dataset.s3key = joined; // compat
+    if (input) {
+      const joined = keys.join(",");
+      input.dataset.s3keys = joined;
+      input.dataset.s3key  = joined;
+    }
   });
 
-  /* ----------- volver a aplicar el toggle de NDIS ----------- */
-  document
-    .getElementById("ndisEligible")
+  // re-aplicar NDIS toggle
+  document.getElementById("ndisEligible")
     ?.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
@@ -1098,29 +1099,25 @@ window.saveStep = async function saveStep() {
 document.addEventListener("DOMContentLoaded", async () => {
   if (isReader) {
     showAllReaderMode();
-    document
-      .querySelectorAll("input, textarea, select")
-      .forEach((el) => (el.disabled = true));
+    document.querySelectorAll("input, textarea, select").forEach(el => el.disabled = true);
     await loadForReader();
     return;
   }
 
   const params = new URLSearchParams(location.search);
-
-  // 1) ¿viene un rt= ?  → canje + hydrate
   const rt = params.get("rt");
+  const tokenParam = params.get("token");
+
   if (rt) {
     await resumeExchangeAndHydrate(rt);
+  } else if (tokenParam) {
+    localStorage.setItem("draftToken", tokenParam);
+    await hydrateFromTokenEdit(tokenParam);
   } else {
-    // 2) ¿viene un token= ?  → hydrate directo
-    const tokenParam = params.get("token");
-    if (tokenParam) {
-      localStorage.setItem("draftToken", tokenParam);
-      await hydrateFromTokenEdit(tokenParam);
-    }
+    // ← ESTE ERA EL HUECO: intentar por cookie cuando no hay params
+    await hydrateFromCookieIfAny();
   }
 
-  // 3) init UI
   initNdisToggle();
   showStep(currentStep);
 });
