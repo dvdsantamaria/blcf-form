@@ -16,8 +16,8 @@
 
   /* -------------------- Optional fields -------------------- */
   const OPTIONAL_FIELDS = new Set([
-    "ndis.notEligibleReason",
     "docs.diagnosisLetter",
+    "docs.additionalLetterOptional",
     // Parent two full block
     "parent2.relationshipToChild",
     "parent2.firstName",
@@ -67,11 +67,8 @@
     ],
     2: [
       "ndis.participantEligible",
-      "docs.supportLetterHealthProfessional",
       "therapy.toBeFunded",
       "therapy.frequencyOrEquipment",
-      "therapy.goals",
-      "docs.ndisPlanOrGoals",
       "therapy.noGrantImpact",
     ],
     3: ["household.sameHousehold", "dependents.countUnder18"],
@@ -140,7 +137,7 @@
   const readableName = (name) => {
     const map = {
       "ndis.participantEligible": "NDIS participant or eligible",
-      "docs.supportLetterHealthProfessional": "Support letter file",
+      "therapy.goals": "Child’s therapy goals",
       "docs.ndisPlanOrGoals": "Ndis plan or goals",
     };
     return map[name] || name;
@@ -179,6 +176,20 @@
       });
     });
   })();
+
+  /* -------------------- NDIS show/hide -------------------- */
+  const ndisSelect = elFor("ndis.participantEligible");
+  function toggleNdisFields() {
+    const yes = ndisSelect && ndisSelect.value === "Yes";
+    document
+      .querySelectorAll(".yes-only")
+      .forEach((el) => (el.style.display = yes ? "" : "none"));
+    document
+      .querySelectorAll(".no-only")
+      .forEach((el) => (el.style.display = yes ? "none" : ""));
+  }
+  ndisSelect?.addEventListener("change", toggleNdisFields);
+  toggleNdisFields();
 
   /* -------------------- Age autofill -------------------- */
   const parseYMD = (s) => {
@@ -228,6 +239,18 @@
   function validateStep(idx) {
     ensureAgeFromDob();
     const required = STEP_REQUIRED[idx] || [];
+
+    // Dynamic NDIS requirements
+    if (idx === 2) {
+      const ndisSelectEl = elFor("ndis.participantEligible");
+      const yes = ndisSelectEl && ndisSelectEl.value === "Yes";
+      if (yes) {
+        required.push("therapy.goals", "docs.ndisPlanOrGoals");
+      } else {
+        required.push("ndis.notEligibleReason");
+      }
+    }
+
     const container = steps[idx];
     clearInvalid(container);
 
@@ -237,7 +260,7 @@
     required.forEach((name) => {
       if (OPTIONAL_FIELDS.has(name)) return;
       const el = elFor(name);
-      if (!el) return;
+      if (!el || !el.offsetParent) return;
 
       if (isCheckbox(name)) {
         if (!el.checked) {
@@ -315,8 +338,8 @@
 
   /* -------------------- Draft logic (edit mode) -------------------- */
   if (!isReader) {
-    /* …─── ensureToken, upload handling, saveStep, final submit (sin cambios desde tu última versión) … */
-    /* (omito aquí por brevedad: simplemente conserva tu código actual) */
+    // …tu lógica existente de token, carga a S3, saveStep, submit, etc.
+    // (se mantiene igual; no requiere cambios para esta refactorización)
   } else {
     window.saveStep = () => {};
   }

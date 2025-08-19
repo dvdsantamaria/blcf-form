@@ -67,6 +67,12 @@ body {
   display: block;
 }
 
+.yes-only,
+.no-only {
+  display: none;
+}
+
+
 /* 7. Mobile: logo y título centrados, form más abajo */
 @media (max-width: 768px) {
   .logo {
@@ -97,3 +103,4 @@ body {
     justify-content: flex-end;
   }
 }
+

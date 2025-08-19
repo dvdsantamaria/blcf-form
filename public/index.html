@@ -232,87 +232,68 @@
         </div>
 
         <!-- ===================== STEP 3 ===================== -->
-        <div class="step" id="step3">
-          <h2>NDIS and Therapy</h2>
+      <!-- ===================== STEP 3 ===================== -->
+<div class="step" id="step3">
+  <h2>NDIS and Therapy</h2>
 
-          <label class="form-label">Is your child an NDIS participant or eligible?</label>
-          <select class="form-select" name="ndis.participantEligible">
-            <option value="">Select</option>
-            <option value="Yes">Yes</option>
-            <option value="No">No</option>
-          </select>
+  <!-- 1) Pregunta inicial -->
+  <label class="form-label">Is your child an NDIS participant or eligible? *</label>
+  <select class="form-select" name="ndis.participantEligible" id="ndisEligible">
+    <option value="">Select</option>
+    <option value="Yes">Yes</option>
+    <option value="No">No</option>
+  </select>
 
-          <label class="form-label mt-2">If NO, why not?</label>
-          <textarea
-            class="form-control"
-            rows="2"
-            name="ndis.notEligibleReason"
-          ></textarea>
+  <!-- 2)-NO  →  motivo obligatorio -->
+  <div class="no-only mt-2">
+    <label class="form-label">If NO, why not? *</label>
+    <textarea class="form-control" rows="2" name="ndis.notEligibleReason"></textarea>
+  </div>
 
-          <label class="form-label mt-2">Support letter from health professional</label>
-          <input
-            class="form-control"
-            type="file"
-            name="docs.supportLetterHealthProfessional"
-            accept=".pdf,.jpg,.jpeg,.png,.webp,.heic"
-            multiple
-          />
+  <!-- 3)-YES →  plan + goals -->
+  <div class="yes-only mt-2">
+    <label class="form-label">Ndis plan or goals *</label>
+    <input
+      class="form-control"
+      type="file"
+      name="docs.ndisPlanOrGoals"
+      accept=".pdf,.jpg,.jpeg,.png,.webp,.heic"
+      multiple
+    />
 
-          <label class="form-label mt-2">Therapy/therapies to be funded</label>
-          <textarea
-            class="form-control"
-            rows="2"
-            name="therapy.toBeFunded"
-          ></textarea>
+    <label class="form-label mt-2">Child’s therapy goals *</label>
+    <textarea class="form-control" rows="3" name="therapy.goals"></textarea>
+  </div>
 
-          <label class="form-label mt-2">Therapy frequency or equipment required</label>
-          <textarea
-            class="form-control"
-            rows="2"
-            name="therapy.frequencyOrEquipment"
-          ></textarea>
+  <!-- 4) Therapies & frequency (siempre) -->
+  <label class="form-label mt-3">Therapy/therapies to be funded *</label>
+  <textarea class="form-control" rows="2" name="therapy.toBeFunded"></textarea>
 
-          <label class="form-label mt-2">Child's therapy goals</label>
-          <textarea
-            class="form-control"
-            rows="3"
-            name="therapy.goals"
-          ></textarea>
+  <label class="form-label mt-2">Therapy frequency or equipment required *</label>
+  <textarea class="form-control" rows="2" name="therapy.frequencyOrEquipment"></textarea>
 
-          <label class="form-label mt-2">Ndis plan or goals</label>
-          <input
-            class="form-control"
-            type="file"
-            name="docs.ndisPlanOrGoals"
-            accept=".pdf,.jpg,.jpeg,.png,.webp,.heic"
-            multiple
-          />
+  <!-- 5) Siempre visible al final -->
+  <label class="form-label mt-3">Impact if grant is not received *</label>
+  <textarea class="form-control" rows="2" name="therapy.noGrantImpact"></textarea>
 
-          <label class="form-label mt-2">Impact if grant is not received</label>
-          <textarea
-            class="form-control"
-            rows="2"
-            name="therapy.noGrantImpact"
-          ></textarea>
+  <label class="form-label mt-2">Diagnosis letter (optional)</label>
+  <input
+    class="form-control"
+    type="file"
+    name="docs.diagnosisLetter"
+    accept=".pdf,.jpg,.jpeg,.png,.webp,.heic"
+    multiple
+  />
 
-          <label class="form-label mt-2">Diagnosis letter</label>
-          <input
-            class="form-control"
-            type="file"
-            name="docs.diagnosisLetter"
-            accept=".pdf,.jpg,.jpeg,.png,.webp,.heic"
-            multiple
-          />
-
-          <label class="form-label mt-2">Additional documentation</label>
-          <input
-            class="form-control"
-            type="file"
-            name="docs.additionalLetterOptional"
-            accept=".pdf,.jpg,.jpeg,.png,.webp,.heic"
-            multiple
-          />
-        </div>
+  <label class="form-label mt-2">Additional documentation (optional)</label>
+  <input
+    class="form-control"
+    type="file"
+    name="docs.additionalLetterOptional"
+    accept=".pdf,.jpg,.jpeg,.png,.webp,.heic"
+    multiple
+  />
+</div>
 
         <!-- ===================== STEP 4 ===================== -->
         <div class="step" id="step4">
