@@ -663,47 +663,100 @@ if (!isReader) {
     throw new Error("Signed URL failed");
   }
   // ---- Enviar link de reanudación por mail (una sola vez por email) ----
+// ---- Enviar link de reanudación por mail (una sola vez por email) ----
 async function sendResumeEmailOnce(email, token) {
-  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email).trim())) return;
+  const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!email || !valid.test(String(email).trim())) return;
   if (!token) return;
 
-  const key = `resumeSent:${email}`;
+  const cleanEmail = String(email).trim();
+  const key = `resumeSent:${cleanEmail}`;
   if (localStorage.getItem(key)) return; // dedupe
 
-  // Endpoints conocidos / fallbacks
-  const endpoints = [
+  const resumeUrlStr =
+    `${location.origin}${location.pathname}?token=${encodeURIComponent(token)}`;
+
+  // 1) Endpoints dedicados (si existen)
+  const dedicated = [
     `${API_BASE}/resume/send`,
     `${API_BASE}/form/resume-send`,
     `/api/resume/send`,
     `/resume/send`,
+    // extras habituales
+    `${API_BASE}/form/send-resume`,
+    `${API_BASE}/form/send-draft-link`,
   ];
 
-  const payload = { email: String(email).trim(), token };
+  const jsonPayload = { email: cleanEmail, token, resumeUrl: resumeUrlStr };
+  const fdPayload = new FormData();
+  fdPayload.append("email", cleanEmail);
+  fdPayload.append("token", token);
+  fdPayload.append("resumeUrl", resumeUrlStr);
 
-  for (const url of endpoints) {
+  for (const url of dedicated) {
     try {
       const r1 = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(jsonPayload),
       });
-      if (r1.ok) {
-        localStorage.setItem(key, String(Date.now()));
-        return;
-      }
+      if (r1.ok) { localStorage.setItem(key, String(Date.now())); return; }
     } catch {}
-
     try {
-      const fd = new FormData();
-      fd.append("email", payload.email);
-      fd.append("token", payload.token);
-      const r2 = await fetch(url, { method: "POST", body: fd });
-      if (r2.ok) {
-        localStorage.setItem(key, String(Date.now()));
-        return;
-      }
+      const r2 = await fetch(url, { method: "POST", body: fdPayload });
+      if (r2.ok) { localStorage.setItem(key, String(Date.now())); return; }
     } catch {}
   }
+
+  // 2) Fallback: piggyback sobre save-draft (algunos backends mandan mail si ven estos flags)
+  const saveDraftLike = [
+    `${API_BASE}/form/save-draft`,
+    `${API_BASE}/save-draft`,
+    `/api/form/save-draft`,
+    `/save-draft`,
+  ];
+
+  for (const url of saveDraftLike) {
+    // a) JSON
+    try {
+      const r = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: cleanEmail,
+          token,
+          step: currentStep,
+          resumeEmail: cleanEmail,
+          resumeUrl: resumeUrlStr,
+          sendEmail: true,
+          notify: true,
+          sendResumeEmail: true,
+        }),
+      });
+      if (r.ok) { localStorage.setItem(key, String(Date.now())); return; }
+    } catch {}
+
+    // b) FormData
+    try {
+      const fd = new FormData();
+      fd.append("email", cleanEmail);
+      fd.append("token", token);
+      fd.append("step", String(currentStep));
+      fd.append("resumeEmail", cleanEmail);
+      fd.append("resumeUrl", resumeUrlStr);
+      fd.append("sendEmail", "1");
+      fd.append("notify", "1");
+      fd.append("sendResumeEmail", "1");
+      const r = await fetch(url, { method: "POST", body: fd });
+      if (r.ok) { localStorage.setItem(key, String(Date.now())); return; }
+    } catch {}
+  }
+
+  // 3) Último recurso: copiar el link al portapapeles para el usuario
+  try {
+    await navigator.clipboard.writeText(resumeUrlStr);
+    showToast("Resume link copied to clipboard.");
+  } catch {}
 }
 
   async function ensureToken() {
