@@ -153,15 +153,17 @@ export async function exchangeResumeToken(req, res) {
       path: "/",
     });
 
+
     /* ---- responde según quién lo pide ---- */
     const wantsJson =
-     req.xhr ||
+      req.xhr ||
       req.headers.accept?.includes("application/json") ||
       req.headers["sec-fetch-mode"] === "cors" ||
       req.query.json === "1";
 
-    if (wantsJSON) {
-      // llamado vía fetch → devolver JSON para que el frontend hidrate
+    // 🔧 <<<  EL CAMBIO  >>>  usamos wantsJson (no wantsJSON)
+    if (wantsJson) {
+      // llamado vía fetch → devolver JSON
       return res.json({ ok: true, token: doc.submissionId });
     }
 
@@ -175,7 +177,6 @@ export async function exchangeResumeToken(req, res) {
     return res.status(500).send("Internal Server Error");
   }
 }
-
 /* GET /api/resume/get-draft */
 export async function getDraft(req, res) {
   const reqId = req.requestId || "-";
