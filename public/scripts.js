@@ -130,6 +130,40 @@
     node._h = setTimeout(() => (node.style.opacity = "0"), 3000);
   }
 
+  async function trySaveDraft(payloadObj) {
+    const endpoints = [`${API_BASE}/save-draft`, `/api/form/save-draft`, `/save-draft`];
+  
+    // Build a FormData version as fallback
+    const fd = new FormData();
+    Object.entries(payloadObj).forEach(([k, v]) => fd.append(k, v));
+  
+    let lastErr;
+  
+    for (const url of endpoints) {
+      // 1) JSON first
+      try {
+        const r1 = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payloadObj),
+        });
+        if (r1.ok) return { url, json: await r1.json() };
+  
+        // 404/415 → probamos FormData
+        if (r1.status === 404 || r1.status === 415) {
+          const r2 = await fetch(url, { method: "POST", body: fd });
+          if (r2.ok) return { url, json: await r2.json() };
+          lastErr = new Error(`save-draft ${r2.status} @ ${url}`);
+        } else {
+          lastErr = new Error(`save-draft ${r1.status} @ ${url}`);
+        }
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    throw lastErr || new Error("save-draft failed");
+  }
+
   const clearAllInvalid = () =>
     document.querySelectorAll(".is-invalid").forEach((el) => {
       el.classList.remove("is-invalid");
@@ -149,6 +183,8 @@
     el.addEventListener("input", remove, { once: true });
     el.addEventListener("change", remove, { once: true });
   };
+
+  
 
   const readableName = (name) => {
     const map = {
@@ -517,16 +553,17 @@
     async function ensureToken() {
       let token = localStorage.getItem("draftToken");
       if (token) return token;
-      const fd = new FormData();
-      fd.append("step", currentStep);
-      const res = await fetch(`${API_BASE}/save-draft`, {
-        method: "POST",
-        body: fd,
-      });
-      if (!res.ok) throw new Error(`save-draft ${res.status}`);
-      token = (await res.json()).token;
-      localStorage.setItem("draftToken", token);
-      return token;
+    
+      const base = { step: currentStep };
+      try {
+        const { json } = await trySaveDraft(base);
+        token = json?.token;
+        if (token) localStorage.setItem("draftToken", token);
+        return token;
+      } catch (err) {
+        console.error("ensureToken error:", err);
+        throw err;
+      }
     }
 
     function validateDraftMin() {
@@ -601,36 +638,53 @@
 
     // Draft save
     window.saveStep = async function saveStep() {
-      clearAllInvalid();
-      if (!validateDraftMin()) return;
-
+      clearAllInvalid?.(); // si existe en tu archivo
+    
+      // validación mínima para permitir guardar
+      const DRAFT_MIN_REQUIRED = ["parent1.firstName", "parent1.mobile", "parent1.email"];
+      const missing = [];
+      let firstInvalid = null;
+      DRAFT_MIN_REQUIRED.forEach((name) => {
+        const el = document.querySelector(`[name="${name}"]`);
+        if (!el) return;
+        const val = (el.value || "").trim();
+        const ok = name === "parent1.email" ? /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val) : !!val;
+        if (!ok) {
+          missing.push(name);
+          if (!firstInvalid) firstInvalid = el;
+          el.classList?.add("is-invalid");
+        }
+      });
+      if (missing.length) {
+        showToast(`Please complete: ${missing.join(", ")} to save your draft.`);
+        firstInvalid?.scrollIntoView({ behavior: "smooth", block: "center" });
+        firstInvalid?.focus();
+        return;
+      }
+    
+      // construimos payload: campos + s3keys de file inputs
       const formData = new FormData(grantForm);
       document.querySelectorAll('input[type="file"]').forEach((input) => {
         if (formData.has(input.name)) formData.delete(input.name);
-        if (input.dataset.s3key)
-          formData.append(input.name, input.dataset.s3key);
+        if (input.dataset.s3key) formData.append(input.name, input.dataset.s3key);
       });
-      formData.append("step", currentStep);
-      const existingToken = localStorage.getItem("draftToken");
-      if (existingToken) formData.append("token", existingToken);
-
+    
+      // lo convertimos a objeto plano para poder enviar JSON o FormData
       const payload = {};
-      formData.forEach((value, key) => {
-        payload[key] = value;
-      });
-
+      formData.forEach((v, k) => (payload[k] = v));
+      payload.step = currentStep;
+    
+      // si ya tenemos token, incluirlo
+      const existingToken = localStorage.getItem("draftToken");
+      if (existingToken) payload.token = existingToken;
+    
       try {
-        const resp = await fetch(`${API_BASE}/save-draft`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        if (!resp.ok) throw new Error(`save-draft ${resp.status}`);
-        const json = await resp.json();
-
-        const tokenFromResp = json.token || existingToken;
-        if (json.token) localStorage.setItem("draftToken", json.token);
-
+        const { json } = await trySaveDraft(payload); // ← usa helper con fallbacks
+    
+        // guardar/actualizar token
+        const tokenFromResp = json?.token || existingToken;
+        if (json?.token) localStorage.setItem("draftToken", json.token);
+    
         console.log("✅ Draft saved:", tokenFromResp);
         showToast("Draft saved.");
       } catch (err) {
