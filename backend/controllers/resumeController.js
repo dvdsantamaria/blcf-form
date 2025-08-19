@@ -153,7 +153,6 @@ export async function exchangeResumeToken(req, res) {
       path: "/",
     });
 
-
     /* ---- responde según quién lo pide ---- */
     const wantsJson =
       req.xhr ||
@@ -161,9 +160,8 @@ export async function exchangeResumeToken(req, res) {
       req.headers["sec-fetch-mode"] === "cors" ||
       req.query.json === "1";
 
-    // 🔧 <<<  EL CAMBIO  >>>  usamos wantsJson (no wantsJSON)
     if (wantsJson) {
-      // llamado vía fetch → devolver JSON
+      // llamado vía fetch → devolver JSON para que el frontend hidrate
       return res.json({ ok: true, token: doc.submissionId });
     }
 
