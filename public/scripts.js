@@ -16,26 +16,23 @@
   const grantForm = document.getElementById("grantForm");
 
   /* -------------------- Optional fields -------------------- */
-  const OPTIONAL_FIELDS = new Set([
-    "ndis.notEligibleReason",
-    "docs.diagnosisLetter",
-    "docs.additionalLetterOptional",
-    // Parent two full block (optional)
-    "parent2.relationshipToChild",
-    "parent2.firstName",
-    "parent2.lastName",
-    "parent2.mobile",
-    "parent2.email",
-    "parent2.employmentStatus",
-    "parent2.occupation",
-    "parent2.centrelinkPayments",
-    "parent2.livingArrangements",
-    "parent2.relationshipToParent1",
-    // Household extras
-    "dependents.ages",
-    "dependents.withDisabilityCount",
-    "otherConditions.details",
-  ]);
+const OPTIONAL_FIELDS = new Set([
+  "docs.diagnosisLetter",
+  "docs.additionalLetterOptional",
+  "parent2.relationshipToChild",
+  "parent2.firstName",
+  "parent2.lastName",
+  "parent2.mobile",
+  "parent2.email",
+  "parent2.employmentStatus",
+  "parent2.occupation",
+  "parent2.centrelinkPayments",
+  "parent2.livingArrangements",
+  "parent2.relationshipToParent1",
+  "dependents.ages",
+  "dependents.withDisabilityCount",
+  "otherConditions.details",
+]);
 
   /* -------------------- Required fields by step -------------------- */
   const STEP_REQUIRED = {
@@ -182,59 +179,69 @@
     return map[name] || name;
   };
 
-  const elFor = (name) => document.querySelector(`[name="${name}"]`);
-
   /* -------------------- Label decoration -------------------- */
-  (function decorateLabels() {
-    OPTIONAL_FIELDS.forEach((name) => {
+const elFor = (name) => document.querySelector(`[name="${name}"]`);
+
+(function decorateLabels() {
+  OPTIONAL_FIELDS.forEach((name) => {
+    const el = elFor(name);
+    if (!el) return;
+    let label =
+      el.previousElementSibling?.tagName === "LABEL"
+        ? el.previousElementSibling
+        : null;
+    if (!label && el.id) label = document.querySelector(`label[for="${el.id}"]`);
+    if (label && !/(optional)/i.test(label.textContent))
+      label.innerHTML = `${label.innerHTML} <span class="text-muted">(optional)</span>`;
+  });
+
+  Object.keys(STEP_REQUIRED).forEach((k) => {
+    STEP_REQUIRED[k].forEach((name) => {
+      if (OPTIONAL_FIELDS.has(name)) return;
       const el = elFor(name);
       if (!el) return;
       let label =
         el.previousElementSibling?.tagName === "LABEL"
           ? el.previousElementSibling
           : null;
-      if (!label && el.id)
-        label = document.querySelector(`label[for="${el.id}"]`);
-      if (label && !/(optional)/i.test(label.textContent))
-        label.innerHTML = `${label.innerHTML} <span class="text-muted">(optional)</span>`;
+      if (!label && el.id) label = document.querySelector(`label[for="${el.id}"]`);
+      if (label && !/\*\s*$/.test(label.textContent))
+        label.innerHTML = `${label.innerHTML} <span class="text-danger">*</span>`;
     });
+  });
 
-    Object.keys(STEP_REQUIRED).forEach((k) => {
-      STEP_REQUIRED[k].forEach((name) => {
-        if (OPTIONAL_FIELDS.has(name)) return;
-        const el = elFor(name);
-        if (!el) return;
-        let label =
-          el.previousElementSibling?.tagName === "LABEL"
-            ? el.previousElementSibling
-            : null;
-        if (!label && el.id)
-          label = document.querySelector(`label[for="${el.id}"]`);
-        if (label && !/\*\s*$/.test(label.textContent))
-          label.innerHTML = `${label.innerHTML} <span class="text-danger">*</span>`;
-      });
-    });
+  // --- Fix: asegurar que el label de "If NO, why not?" NO muestre "(optional)"
+  (function fixNotEligibleLabel() {
+    const el = elFor("ndis.notEligibleReason");
+    if (!el) return;
+    let label =
+      el.previousElementSibling?.tagName === "LABEL"
+        ? el.previousElementSibling
+        : (el.id ? document.querySelector(`label[for="${el.id}"]`) : null);
+    if (!label) return;
+    label.innerHTML = label.textContent.replace(/\s*\(optional\)\s*/i, "");
   })();
+})();
 
-  /* -------------------- NDIS show/hide -------------------- */
-  function initNdisToggle() {
-    const ndisSelect = document.getElementById("ndisEligible");
-    if (!ndisSelect) return;
-  
-    const show = (sel, on) =>
-      document.querySelectorAll(sel).forEach((el) => {
-        el.style.display = on ? "block" : "none";
-      });
-  
-    const toggle = () => {
-      const v = ndisSelect.value;     
-      show(".yes-only", v === "Yes"); 
-      show(".no-only",  v === "No");  
-    };
-  
-    ndisSelect.addEventListener("change", toggle);
-    toggle(); 
-  }
+/* -------------------- NDIS show/hide -------------------- */
+function initNdisToggle() {
+  const ndisSelect = document.getElementById("ndisEligible");
+  if (!ndisSelect) return;
+
+  const apply = () => {
+    const val = ndisSelect.value;
+    const showYes = val === "Yes";
+    const showNo  = val === "No";
+
+    document.querySelectorAll(".yes-only")
+      .forEach((el) => (el.style.display = showYes ? "" : "none"));
+    document.querySelectorAll(".no-only")
+      .forEach((el) => (el.style.display = showNo ? "" : "none"));
+  };
+
+  ndisSelect.addEventListener("change", apply);
+  apply(); // estado inicial
+}
   /* -------------------- Age autofill (editable) -------------------- */
   const parseYMD = (s) => {
     const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || "");
@@ -493,6 +500,62 @@
       showToast("Viewing only.");
     }
   });
+
+  /* ---- Edit-mode: hydrate by token (resume) ---- */
+async function hydrateFromTokenEdit(token) {
+  const qs = `token=${encodeURIComponent(token)}`;
+  const urls = [
+    `${API_BASE}/form/view?${qs}`,
+    `/api/form/view?${qs}`,
+    `/form/view?${qs}`,
+  ];
+
+  let payload = null;
+  for (const url of urls) {
+    try {
+      const r = await fetch(url);
+      if (r.ok) { payload = await r.json(); break; }
+    } catch {}
+  }
+  if (!payload) { console.warn("resume view not available"); return; }
+
+  const data = payload?.data || {};
+
+  // Campos escalares
+  Object.entries(data).forEach(([name, value]) => {
+    const input = document.querySelector(`[name="${name}"]`);
+    if (!input || input.type === "file") return;
+
+    if (input.type === "checkbox") {
+      input.checked = Boolean(value);
+    } else if (input.type === "radio") {
+      const radio = document.querySelector(`input[name="${name}"][value="${value}"]`);
+      if (radio) radio.checked = true;
+    } else {
+      input.value = value ?? "";
+    }
+  });
+
+  // Cargar claves de archivos en data-* para conservar inputs editables
+  const files = Array.isArray(payload?.fileKeys) ? payload.fileKeys : [];
+  const byField = {};
+  files.forEach(({ field, key }) => {
+    if (!field || !key) return;
+    (byField[field] ||= []).push(key);
+  });
+  Object.entries(byField).forEach(([field, keys]) => {
+    const input = document.querySelector(`input[type="file"][name="${field}"]`);
+    if (input) {
+      const joined = keys.join(",");
+      input.dataset.s3keys = joined;
+      input.dataset.s3key  = joined; // compat
+    }
+  });
+
+  // Reaplicar toggle por si vino NDIS del servidor
+  document.getElementById("ndisEligible")
+    ?.dispatchEvent(new Event("change", { bubbles: true }));
+}
 
   /* -------------------- Draft logic (edit mode) -------------------- */
 if (!isReader) {
@@ -824,16 +887,27 @@ if (!isReader) {
   };
 
   /* -------------------- Initial render -------------------- */
-  document.addEventListener("DOMContentLoaded", async () => {
-    if (isReader) {
-      showAllReaderMode();
-      document
-        .querySelectorAll("input, textarea, select")
-        .forEach((el) => (el.disabled = true));
-      await loadForReader();
-      return;
-    }
-    initNdisToggle();
-    showStep(currentStep);
-  });
+ /* -------------------- Initial render -------------------- */
+document.addEventListener("DOMContentLoaded", async () => {
+  if (isReader) {
+    showAllReaderMode();
+    document
+      .querySelectorAll("input, textarea, select")
+      .forEach((el) => (el.disabled = true));
+    await loadForReader();
+    return;
+  }
+
+  initNdisToggle();
+
+  // Reanudar por token en modo edición
+  const params = new URLSearchParams(location.search);
+  const tokenParam = params.get("token");
+  if (tokenParam) {
+    localStorage.setItem("draftToken", tokenParam);
+    await hydrateFromTokenEdit(tokenParam);
+  }
+
+  showStep(currentStep);
+});
 })();
