@@ -1,4 +1,5 @@
 // public/scripts.js (refactor Aug-2025)
+// All logic in one IIFE. Comments concise, English, no fancy punctuation.
 
 (() => {
   "use strict";
@@ -12,12 +13,19 @@
   const steps = document.querySelectorAll(".step");
   const submitBtn = document.getElementById("submitBtn");
   const saveBtn = document.getElementById("saveDraftBtn");
+  const grantForm = document.getElementById("grantForm");
 
   /* -------------------- Optional fields -------------------- */
-
+  // Updated to match new flow (keep legacy optional where harmless)
   const OPTIONAL_FIELDS = new Set([
+    // New optional files
     "docs.diagnosisLetter",
     "docs.additionalLetterOptional",
+
+    // Legacy optional flags/notes (safe to keep)
+    "ndis.moreSupportWhy",
+
+    // Parent two full block
     "parent2.relationshipToChild",
     "parent2.firstName",
     "parent2.lastName",
@@ -28,13 +36,15 @@
     "parent2.centrelinkPayments",
     "parent2.livingArrangements",
     "parent2.relationshipToParent1",
+
+    // Household extras
     "dependents.ages",
     "dependents.withDisabilityCount",
     "otherConditions.details",
   ]);
 
-    /* -------------------- mandatory fields -------------------- */
-
+  /* -------------------- Required fields by step -------------------- */
+  // Step 2 is now dynamic (see validateStep)
   const STEP_REQUIRED = {
     0: [
       "referral.source",
@@ -54,6 +64,7 @@
       "child.dob",
       "child.age",
       "child.gender",
+      "child.phone",
       "child.streetNumber",
       "child.suburb",
       "child.state",
@@ -66,15 +77,19 @@
       "child.currentTherapies",
     ],
     2: [
-      "ndis.participantEligible",          
+      "ndis.participantEligible", // dynamic extras added in validateStep
       "therapy.toBeFunded",
       "therapy.frequencyOrEquipment",
       "therapy.noGrantImpact",
+      // NOTE: removed legacy requireds:
+      // "docs.ndisCommunication",
+      // "docs.supportLetterHealthProfessional",
+      // "therapy.goals",
+      // "docs.diagnosisLetter",
     ],
     3: ["household.sameHousehold", "dependents.countUnder18"],
     4: ["consent.terms", "consent.truth", "consent.report", "consent.media"],
   };
-
 
   const DRAFT_MIN_REQUIRED = [
     "parent1.firstName",
@@ -83,27 +98,6 @@
   ];
 
   /* -------------------- Helpers -------------------- */
-
-  /* -------------------- NDIS show/hide -------------------- */
-function initNdisToggle() {
-  const ndisSelect = document.getElementById("ndisEligible");
-  if (!ndisSelect) return;
-
-  const toggle = () => {
-    const yes = ndisSelect.value === "Yes";
-    document
-      .querySelectorAll(".yes-only")
-      .forEach((el) => (el.style.display = yes ? "" : "none"));
-    document
-      .querySelectorAll(".no-only")
-      .forEach((el) => (el.style.display = yes ? "none" : ""));
-  };
-
-  ndisSelect.addEventListener("change", toggle);
-  toggle(); // estado inicial
-}
-
-
   const isEmail = (v) => !!v && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
 
   function showToast(msg) {
@@ -136,6 +130,11 @@ function initNdisToggle() {
     node._h = setTimeout(() => (node.style.opacity = "0"), 3000);
   }
 
+  const clearAllInvalid = () =>
+    document.querySelectorAll(".is-invalid").forEach((el) => {
+      el.classList.remove("is-invalid");
+      el.removeAttribute("aria-invalid");
+    });
 
   const clearInvalid = (container) =>
     container.querySelectorAll(".is-invalid").forEach((el) => {
@@ -153,10 +152,50 @@ function initNdisToggle() {
 
   const readableName = (name) => {
     const map = {
+      "referral.source": "How did you hear about us",
+      // Parent one
+      "parent1.relationshipToChild": "Relationship to the child",
+      "parent1.firstName": "Parent one first name",
+      "parent1.lastName": "Parent one last name",
+      "parent1.mobile": "Parent one mobile",
+      "parent1.email": "Parent one email",
+      "parent1.employmentStatus": "Employment status",
+      "parent1.occupation": "Occupation",
+      "parent1.centrelinkPayments": "Centrelink payments",
+      "parent1.livingArrangements": "Living arrangements",
+      // Child block
+      "child.firstName": "Child first name",
+      "child.lastName": "Child last name",
+      "child.dob": "Date of birth",
+      "child.age": "Age",
+      "child.gender": "Gender",
+      "child.phone": "Child phone",
+      "child.streetNumber": "Street and number",
+      "child.suburb": "Suburb",
+      "child.state": "State",
+      "child.postcode": "Postcode",
+      "child.mainLanguage": "Main language",
+      "child.diagnosis": "Diagnosis",
+      "child.impactDailyLife": "Impact daily life",
+      "child.currentSupports": "Current supports",
+      "child.impactFamily": "Impact family",
+      "child.currentTherapies": "Current therapies",
+      // NDIS (legacy + new)
       "ndis.participantEligible": "NDIS participant or eligible",
-      "docs.ndisPlanOrGoals": "Ndis plan or goals",
+      "docs.ndisCommunication": "NDIS communication file",
+      "docs.supportLetterHealthProfessional": "Support letter file",
+      "therapy.toBeFunded": "Therapies to be funded",
+      "therapy.frequencyOrEquipment": "Frequency or equipment",
       "therapy.goals": "Child’s therapy goals",
+      "therapy.noGrantImpact": "Impact if no grant",
+      "docs.diagnosisLetter": "Diagnosis letter file",
+      "docs.ndisPlanOrGoals": "Ndis plan or goals",
       "ndis.notEligibleReason": "Reason not eligible",
+      // Consent
+      "consent.terms": "Privacy and terms",
+      "consent.truth": "Information correct",
+      "consent.report": "Final report",
+      "consent.media": "Image permission",
     };
     return map[name] || name;
   };
@@ -195,6 +234,29 @@ function initNdisToggle() {
     });
   })();
 
+  /* -------------------- NDIS show/hide -------------------- */
+  function initNdisToggle() {
+    const ndisSelect = document.getElementById("ndisEligible");
+    if (!ndisSelect) return;
+
+    const toggle = () => {
+      const val = ndisSelect.value;
+      const showYes = val === "Yes";
+      const showNo = val === "No";
+
+      document
+        .querySelectorAll(".yes-only")
+        .forEach((el) => (el.style.display = showYes ? "block" : "none"));
+      document
+        .querySelectorAll(".no-only")
+        .forEach((el) => (el.style.display = showNo ? "block" : "none"));
+    };
+
+    ndisSelect.addEventListener("change", toggle);
+    ndisSelect.addEventListener("input", toggle);
+    toggle();
+  }
+
   /* -------------------- Age autofill -------------------- */
   const parseYMD = (s) => {
     const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || "");
@@ -224,6 +286,7 @@ function initNdisToggle() {
     const dobEl = elFor("child.dob");
     const ageEl = elFor("child.age");
     if (!dobEl || !ageEl) return;
+    ageEl.readOnly = true;
     ["input", "change", "blur"].forEach((evt) =>
       dobEl.addEventListener(evt, ensureAgeFromDob)
     );
@@ -242,30 +305,31 @@ function initNdisToggle() {
 
   function validateStep(idx) {
     ensureAgeFromDob();
-  
-    // clonamos porque podemos agregar dinámicamente
+
+    // clone because we'll push dynamic requirements
     const required = STEP_REQUIRED[idx] ? [...STEP_REQUIRED[idx]] : [];
-  
-    /* ----- lógica dinámica para el paso NDIS (idx === 2) ----- */
+
+    // Dynamic NDIS requirements for step 2
     if (idx === 2) {
       const yes = elFor("ndis.participantEligible")?.value === "Yes";
-      yes
-        ? required.push("therapy.goals", "docs.ndisPlanOrGoals")
-        : required.push("ndis.notEligibleReason");
+      if (yes) {
+        required.push("therapy.goals", "docs.ndisPlanOrGoals");
+      } else {
+        required.push("ndis.notEligibleReason");
+      }
     }
-  
+
     const container = steps[idx];
     clearInvalid(container);
-  
+
     const missing = [];
     let firstInvalid = null;
-  
+
     required.forEach((name) => {
       if (OPTIONAL_FIELDS.has(name)) return;
       const el = elFor(name);
-      if (!el || !el.offsetParent) return; // ignora campos ocultos
-  
-      /* -------- checkbox -------- */
+      if (!el) return;
+
       if (isCheckbox(name)) {
         if (!el.checked) {
           missing.push(readableName(name));
@@ -274,8 +338,7 @@ function initNdisToggle() {
         }
         return;
       }
-  
-      /* -------- file input (usa dataset.s3key al subir) -------- */
+
       if (isFile(name)) {
         if (!el.dataset.s3key) {
           missing.push(readableName(name));
@@ -284,8 +347,7 @@ function initNdisToggle() {
         }
         return;
       }
-  
-      /* -------- texto / select -------- */
+
       const val = (el.value || "").trim();
       if (name === "parent1.email" ? !isEmail(val) : !val) {
         missing.push(readableName(name));
@@ -293,7 +355,7 @@ function initNdisToggle() {
         firstInvalid ||= el;
       }
     });
-  
+
     if (missing.length) {
       showToast(`Please complete: ${missing.join(", ")}.`);
       firstInvalid?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -316,7 +378,7 @@ function initNdisToggle() {
 
   /* -------------------- Navigation -------------------- */
   function showStep(n) {
-    if (isReader) return;
+    if (isReader) return; // reader shows all
 
     steps.forEach((s, i) => s.classList.toggle("active", i === n));
 
@@ -342,15 +404,18 @@ function initNdisToggle() {
     if (currentStep >= 0 && currentStep < steps.length) showStep(currentStep);
   };
 
-  /* -------------------- Draft logic (edit mode) -------------------- */
-  if (!isReader) {
-    /* …─── ensureToken, upload handling, saveStep, final submit (sin cambios desde tu última versión) … */
-    /* (omito aquí por brevedad: simplemente conserva tu código actual) */
-  } else {
-    window.saveStep = () => {};
+  /* -------------------- Reader mode -------------------- */
+  function showAllReaderMode() {
+    steps.forEach((s) => s.classList.add("active"));
+    const prevBtn = document.querySelector('button[onclick="nextStep(-1)"]');
+    const nextBtn = document.querySelector('button[onclick="nextStep(1)"]');
+    if (prevBtn) prevBtn.style.display = "none";
+    if (nextBtn) nextBtn.style.display = "none";
+    if (submitBtn) submitBtn.style.display = "none";
+    if (saveBtn) saveBtn.style.display = "none";
   }
 
-  /* --------- Reader: load & hydrate form --------- */
+  /* -------------------- Reader: run after DOM ready -------------------- */
   async function loadForReader() {
     try {
       const qs = new URLSearchParams(location.search);
@@ -358,21 +423,21 @@ function initNdisToggle() {
       if (!token) return;
 
       const res = await fetch(
-        `${API_BASE}/form/view?token=${encodeURIComponent(token)}`
+        `/api/form/view?token=${encodeURIComponent(token)}`
       );
       if (!res.ok) return;
 
       const payload = await res.json();
       const data = payload?.data || {};
 
-      /* -------- hydrate scalar fields -------- */
+      // Hydrate text/checkbox/radio fields (skip file inputs!)
       Object.entries(data).forEach(([name, value]) => {
-        const input = document.querySelector(`[name="${name}"]`);
-        if (!input || input.type === "file") return;
+        const input = elFor(name);
+        if (!input) return;
 
         switch (input.type) {
           case "checkbox":
-            input.checked = Boolean(value);
+            input.checked = !!value;
             break;
           case "radio": {
             const radio = document.querySelector(
@@ -381,54 +446,53 @@ function initNdisToggle() {
             if (radio) radio.checked = true;
             break;
           }
+          case "file":
+            // never set value on file inputs
+            break;
           default:
             input.value = value ?? "";
         }
       });
 
-      /* -------- replace file inputs with placeholders -------- */
+      // 1) Replace ALL file inputs with a placeholder
       const placeholders = new Map();
       document.querySelectorAll('input[type="file"][name]').forEach((input) => {
-        const holder = document.createElement("div");
-        holder.className = "d-block";
-        holder.dataset.field = input.name;
-        holder.textContent = "No file uploaded";
-        placeholders.set(input.name, holder);
-        input.replaceWith(holder);
+        const ph = document.createElement("span");
+        ph.className = "form-control-plaintext text-muted d-block";
+        ph.textContent = "No file uploaded";
+        ph.dataset.field = input.name;
+        placeholders.set(input.name, ph);
+        input.replaceWith(ph);
       });
 
-      /* -------- inject one link per uploaded key -------- */
+      // 2) For each uploaded file, swap placeholder with a signed link
       const files = Array.isArray(payload?.fileKeys) ? payload.fileKeys : [];
-      const byField = {};
-      files.forEach(({ field, key }) => {
-        if (!field || !key) return;
-        (byField[field] ||= []).push(key);
-      });
+      for (const { field, key } of files) {
+        if (!field || !key) continue;
 
-      for (const [field, keys] of Object.entries(byField)) {
-        const holder = placeholders.get(field);
-        if (!holder) continue;
+        const fn = (key || "").split("/").pop() || readableName(field);
+        const a = document.createElement("a");
+        a.textContent = fn;
+        a.target = "_blank";
+        a.rel = "noopener";
+        a.className = "form-control-plaintext d-block";
 
-        holder.innerHTML = ""; // clear "No file uploaded"
-        for (const key of keys) {
-          const fileName = key.split("/").pop() || "file";
-          const link = document.createElement("a");
-          link.textContent = fileName;
-          link.target = "_blank";
-          link.rel = "noopener";
-          link.className = "d-block";
+        try {
+          const r = await fetch(
+            `${API_BASE}/form/file-url?key=${encodeURIComponent(key)}`
+          );
+          const j = await r.json();
+          if (j?.ok && j.url) a.href = j.url;
+        } catch {
+          // keep text without href if presign fails
+        }
 
-          try {
-            const r = await fetch(
-              `${API_BASE}/form/file-url?key=${encodeURIComponent(key)}`
-            );
-            const j = await r.json();
-            link.href = j?.ok && j.url ? j.url : "#";
-            if (!j?.ok) link.textContent = `${fileName} (unavailable)`;
-          } catch {
-            link.textContent = `${fileName} (error)`;
-          }
-          holder.appendChild(link);
+        const ph = placeholders.get(field);
+        if (ph) {
+          ph.replaceWith(a);
+        } else {
+          const near = elFor(field);
+          if (near && near.parentElement) near.parentElement.appendChild(a);
         }
       }
 
@@ -437,29 +501,252 @@ function initNdisToggle() {
       );
     } catch (err) {
       console.error("Error loading reader form:", err);
-      showToast("Could not load submission.");
     }
   }
 
-  if (typeof window.saveStep !== "function") {
-    window.saveStep = () => showToast("Draft saved (stub).");
+  /* -------------------- Form submit blocker in reader -------------------- */
+  grantForm?.addEventListener("submit", (e) => {
+    if (isReader) {
+      e.preventDefault();
+      showToast("Viewing only.");
+    }
+  });
+
+  /* -------------------- Draft logic (edit mode) -------------------- */
+  if (!isReader) {
+    async function ensureToken() {
+      let token = localStorage.getItem("draftToken");
+      if (token) return token;
+      const fd = new FormData();
+      fd.append("step", currentStep);
+      const res = await fetch(`${API_BASE}/save-draft`, {
+        method: "POST",
+        body: fd,
+      });
+      if (!res.ok) throw new Error(`save-draft ${res.status}`);
+      token = (await res.json()).token;
+      localStorage.setItem("draftToken", token);
+      return token;
+    }
+
+    function validateDraftMin() {
+      const missing = [];
+      let firstInvalid = null;
+      DRAFT_MIN_REQUIRED.forEach((name) => {
+        const el = elFor(name);
+        if (!el) return;
+        const val = (el.value || "").trim();
+        const ok = name === "parent1.email" ? isEmail(val) : val.length > 0;
+        if (!ok) {
+          missing.push(readableName(name));
+          markInvalid(el);
+          firstInvalid ||= el;
+        }
+      });
+      if (missing.length) {
+        showToast(`Please complete: ${missing.join(", ")} to save your draft.`);
+        firstInvalid?.scrollIntoView({ behavior: "smooth", block: "center" });
+        firstInvalid?.focus();
+        return false;
+      }
+      return true;
+    }
+
+    // File upload handling
+    document.querySelectorAll('input[type="file"]').forEach((input) => {
+      input.addEventListener("change", async () => {
+        const file = input.files[0];
+        delete input.dataset.s3key;
+        if (!file) return;
+
+        const fieldName = input.name;
+        const ext = file.name.split(".").pop().toLowerCase();
+        const mimeMap = {
+          pdf: "application/pdf",
+          jpg: "image/jpeg",
+          jpeg: "image/jpeg",
+          png: "image/png",
+          webp: "image/webp",
+          heic: "image/heic",
+          heif: "image/heic",
+        };
+        const mime = file.type || mimeMap[ext] || "";
+        if (!mime) return showToast("Unsupported file type.");
+
+        try {
+          const token = await ensureToken();
+          const res = await fetch(
+            `${API_BASE}/generate-upload-url?field=${encodeURIComponent(
+              fieldName
+            )}&token=${encodeURIComponent(token)}&type=${encodeURIComponent(
+              mime
+            )}`
+          );
+          if (!res.ok) throw new Error("Signed URL failed");
+          const { url, key } = await res.json();
+          const up = await fetch(url, {
+            method: "PUT",
+            headers: { "Content-Type": mime },
+            body: file,
+          });
+          if (!up.ok) throw new Error("Upload failed");
+          input.dataset.s3key = key;
+          showToast("File uploaded.");
+        } catch (err) {
+          console.error(err);
+          showToast("Upload error.");
+        }
+      });
+    });
+
+    // Draft save
+    window.saveStep = async function saveStep() {
+      clearAllInvalid();
+      if (!validateDraftMin()) return;
+
+      const formData = new FormData(grantForm);
+      document.querySelectorAll('input[type="file"]').forEach((input) => {
+        if (formData.has(input.name)) formData.delete(input.name);
+        if (input.dataset.s3key)
+          formData.append(input.name, input.dataset.s3key);
+      });
+      formData.append("step", currentStep);
+      const existingToken = localStorage.getItem("draftToken");
+      if (existingToken) formData.append("token", existingToken);
+
+      const payload = {};
+      formData.forEach((value, key) => {
+        payload[key] = value;
+      });
+
+      try {
+        const resp = await fetch(`${API_BASE}/save-draft`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!resp.ok) throw new Error(`save-draft ${resp.status}`);
+        const json = await resp.json();
+
+        const tokenFromResp = json.token || existingToken;
+        if (json.token) localStorage.setItem("draftToken", json.token);
+
+        console.log("✅ Draft saved:", tokenFromResp);
+        showToast("Draft saved.");
+      } catch (err) {
+        console.error("save-draft error:", err);
+        showToast("Save draft failed.");
+      }
+    };
+
+    // Final submit
+    grantForm?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (!validateAllBeforeSubmit()) return;
+
+      const formData = new FormData(grantForm);
+      document.querySelectorAll('input[type="file"]').forEach((input) => {
+        if (formData.has(input.name)) formData.delete(input.name);
+        if (input.dataset.s3key)
+          formData.append(input.name, input.dataset.s3key);
+      });
+      const existingToken = localStorage.getItem("draftToken");
+      if (existingToken) formData.append("token", existingToken);
+
+      try {
+        const res = await fetch(`${API_BASE}/submit-form`, {
+          method: "POST",
+          body: formData,
+        });
+        if (!res.ok) throw new Error("Submit failed");
+        localStorage.removeItem("draftToken");
+        Object.keys(localStorage)
+          .filter((k) => k.startsWith("resumeSent:"))
+          .forEach((k) => localStorage.removeItem(k));
+        currentStep = steps.length - 1; // thank you page
+        showStep(currentStep);
+        showToast("Submission received.");
+      } catch (err) {
+        console.error(err);
+        showToast("Submission failed.");
+      }
+    });
+  } else {
+    // Reader stub
+    window.saveStep = () => {};
   }
+
+  /* -------------------- Dev helper -------------------- */
+  window.devClearResumeSession = async function () {
+    try {
+      await fetch(`${API_BASE}/resume/logout`, { method: "POST" });
+    } catch {}
+    localStorage.removeItem("draftToken");
+    Object.keys(localStorage)
+      .filter((k) => k.startsWith("resumeSent:"))
+      .forEach((k) => localStorage.removeItem(k));
+    showToast("Session cleared.");
+    setTimeout(() => location.replace("/"), 500);
+  };
 
   /* -------------------- Initial render -------------------- */
   document.addEventListener("DOMContentLoaded", async () => {
     if (isReader) {
-      steps.forEach((s) => s.classList.add("active"));
+      // reader-only setup after DOM is ready
+      if (submitBtn) submitBtn.style.display = "none";
+      if (saveBtn) saveBtn.style.display = "none";
       document
         .querySelectorAll("input, textarea, select")
         .forEach((el) => (el.disabled = true));
-      if (submitBtn) submitBtn.style.display = "none";
-      if (saveBtn) saveBtn.style.display = "none";
-      document.getElementById("step6")?.classList.add("d-none");
-      document.querySelector(".buttons")?.classList.add("d-none");
+      showAllReaderMode();
       await loadForReader();
       return;
     }
-    initNdisToggle();  
+
+    // edit mode: if we just resumed, hydrate draft (cookie sent automatically)
+    const params = new URLSearchParams(location.search);
+    if (params.get("resumed")) {
+      try {
+        const res = await fetch(`${API_BASE}/resume/get-draft`, {
+          method: "GET",
+          credentials: "include",
+        });
+        if (!res.ok) throw new Error(`get-draft ${res.status}`);
+        const payload = await res.json();
+
+        // flatten nested data into dot-notation keys
+        const flatten = (obj, prefix = "", res = {}) => {
+          for (const [k, v] of Object.entries(obj)) {
+            const key = prefix ? `${prefix}.${k}` : k;
+            if (v && typeof v === "object" && !Array.isArray(v)) {
+              flatten(v, key, res);
+            } else {
+              res[key] = v;
+            }
+          }
+          return res;
+        };
+        const flat = flatten(payload);
+
+        Object.entries(flat).forEach(([name, value]) => {
+          const input = elFor(name);
+          if (!input) return;
+          if (input.type === "checkbox") {
+            input.checked = Boolean(value);
+          } else {
+            input.value = value ?? "";
+          }
+        });
+
+        if (typeof flat.step === "number") currentStep = flat.step;
+      } catch (err) {
+        console.error("Error loading draft:", err);
+        showToast("Could not load your draft.");
+      }
+    }
+
+    // Initialize NDIS toggle after any hydration so it reflects current value
+    initNdisToggle();
     showStep(currentStep);
   });
 })();
