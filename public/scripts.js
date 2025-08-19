@@ -535,15 +535,26 @@ function initNdisToggle() {
   };
 
   /* -------------------- Reader mode helpers -------------------- */
-  function showAllReaderMode() {
-    steps.forEach((s) => s.classList.add("active"));
-    const prevBtn = document.querySelector('button[onclick="nextStep(-1)"]');
-    const nextBtn = document.querySelector('button[onclick="nextStep(1)"]');
-    if (prevBtn) prevBtn.style.display = "none";
-    if (nextBtn) nextBtn.style.display = "none";
-    if (submitBtn) submitBtn.style.display = "none";
-    if (saveBtn) saveBtn.style.display = "none";
-  }
+function showAllReaderMode() {
+  // mostrar todos menos el último (thank-you)
+  steps.forEach((s, i) => {
+    const isThankYou = i === steps.length - 1;
+    if (isThankYou) {
+      s.classList.remove("active");
+      s.style.display = "none";
+    } else {
+      s.classList.add("active");
+      s.style.removeProperty("display");
+    }
+  });
+
+  const prevBtn = document.querySelector('button[onclick="nextStep(-1)"]');
+  const nextBtn = document.querySelector('button[onclick="nextStep(1)"]');
+  if (prevBtn) prevBtn.style.display = "none";
+  if (nextBtn) nextBtn.style.display = "none";
+  if (submitBtn) submitBtn.style.display = "none";
+  if (saveBtn) saveBtn.style.display = "none";
+}
 
   /* -------------------- Reader: load & hydrate form -------------------- */
   async function loadForReader() {
