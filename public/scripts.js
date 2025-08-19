@@ -16,16 +16,11 @@
   const grantForm = document.getElementById("grantForm");
 
   /* -------------------- Optional fields -------------------- */
-  // Updated to match new flow (keep legacy optional where harmless)
   const OPTIONAL_FIELDS = new Set([
-    // New optional files
+    "ndis.notEligibleReason",
     "docs.diagnosisLetter",
     "docs.additionalLetterOptional",
-
-    // Legacy optional flags/notes (safe to keep)
-    "ndis.moreSupportWhy",
-
-    // Parent two full block
+    // Parent two full block (optional)
     "parent2.relationshipToChild",
     "parent2.firstName",
     "parent2.lastName",
@@ -36,7 +31,6 @@
     "parent2.centrelinkPayments",
     "parent2.livingArrangements",
     "parent2.relationshipToParent1",
-
     // Household extras
     "dependents.ages",
     "dependents.withDisabilityCount",
@@ -44,7 +38,6 @@
   ]);
 
   /* -------------------- Required fields by step -------------------- */
-  // Step 2 is now dynamic (see validateStep)
   const STEP_REQUIRED = {
     0: [
       "referral.source",
@@ -64,7 +57,6 @@
       "child.dob",
       "child.age",
       "child.gender",
-      "child.phone",
       "child.streetNumber",
       "child.suburb",
       "child.state",
@@ -77,15 +69,11 @@
       "child.currentTherapies",
     ],
     2: [
-      "ndis.participantEligible", // dynamic extras added in validateStep
+      // dynamic requirements are added in validateStep for this step
+      "ndis.participantEligible",
       "therapy.toBeFunded",
       "therapy.frequencyOrEquipment",
       "therapy.noGrantImpact",
-      // NOTE: removed legacy requireds:
-      // "docs.ndisCommunication",
-      // "docs.supportLetterHealthProfessional",
-      // "therapy.goals",
-      // "docs.diagnosisLetter",
     ],
     3: ["household.sameHousehold", "dependents.countUnder18"],
     4: ["consent.terms", "consent.truth", "consent.report", "consent.media"],
@@ -130,40 +118,6 @@
     node._h = setTimeout(() => (node.style.opacity = "0"), 3000);
   }
 
-  async function trySaveDraft(payloadObj) {
-    const endpoints = [`${API_BASE}/save-draft`, `/api/form/save-draft`, `/save-draft`];
-  
-    // Build a FormData version as fallback
-    const fd = new FormData();
-    Object.entries(payloadObj).forEach(([k, v]) => fd.append(k, v));
-  
-    let lastErr;
-  
-    for (const url of endpoints) {
-      // 1) JSON first
-      try {
-        const r1 = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payloadObj),
-        });
-        if (r1.ok) return { url, json: await r1.json() };
-  
-        // 404/415 → probamos FormData
-        if (r1.status === 404 || r1.status === 415) {
-          const r2 = await fetch(url, { method: "POST", body: fd });
-          if (r2.ok) return { url, json: await r2.json() };
-          lastErr = new Error(`save-draft ${r2.status} @ ${url}`);
-        } else {
-          lastErr = new Error(`save-draft ${r1.status} @ ${url}`);
-        }
-      } catch (e) {
-        lastErr = e;
-      }
-    }
-    throw lastErr || new Error("save-draft failed");
-  }
-
   const clearAllInvalid = () =>
     document.querySelectorAll(".is-invalid").forEach((el) => {
       el.classList.remove("is-invalid");
@@ -184,12 +138,9 @@
     el.addEventListener("change", remove, { once: true });
   };
 
-  
-
   const readableName = (name) => {
     const map = {
       "referral.source": "How did you hear about us",
-      // Parent one
       "parent1.relationshipToChild": "Relationship to the child",
       "parent1.firstName": "Parent one first name",
       "parent1.lastName": "Parent one last name",
@@ -199,13 +150,11 @@
       "parent1.occupation": "Occupation",
       "parent1.centrelinkPayments": "Centrelink payments",
       "parent1.livingArrangements": "Living arrangements",
-      // Child block
       "child.firstName": "Child first name",
       "child.lastName": "Child last name",
       "child.dob": "Date of birth",
       "child.age": "Age",
       "child.gender": "Gender",
-      "child.phone": "Child phone",
       "child.streetNumber": "Street and number",
       "child.suburb": "Suburb",
       "child.state": "State",
@@ -216,18 +165,15 @@
       "child.currentSupports": "Current supports",
       "child.impactFamily": "Impact family",
       "child.currentTherapies": "Current therapies",
-      // NDIS (legacy + new)
       "ndis.participantEligible": "NDIS participant or eligible",
-      "docs.ndisCommunication": "NDIS communication file",
-      "docs.supportLetterHealthProfessional": "Support letter file",
-      "therapy.toBeFunded": "Therapies to be funded",
-      "therapy.frequencyOrEquipment": "Frequency or equipment",
-      "therapy.goals": "Child’s therapy goals",
-      "therapy.noGrantImpact": "Impact if no grant",
-      "docs.diagnosisLetter": "Diagnosis letter file",
       "docs.ndisPlanOrGoals": "Ndis plan or goals",
+      "therapy.goals": "Child’s therapy goals",
       "ndis.notEligibleReason": "Reason not eligible",
-      // Consent
+      "therapy.toBeFunded": "Therapies to be funded",
+      "therapy.frequencyOrEquipment": "Therapy frequency or equipment",
+      "therapy.noGrantImpact": "Impact if no grant",
+      "docs.diagnosisLetter": "Diagnosis letter",
+      "docs.additionalLetterOptional": "Additional documentation",
       "consent.terms": "Privacy and terms",
       "consent.truth": "Information correct",
       "consent.report": "Final report",
@@ -236,9 +182,9 @@
     return map[name] || name;
   };
 
-  /* -------------------- Label decoration -------------------- */
   const elFor = (name) => document.querySelector(`[name="${name}"]`);
 
+  /* -------------------- Label decoration -------------------- */
   (function decorateLabels() {
     OPTIONAL_FIELDS.forEach((name) => {
       const el = elFor(name);
@@ -276,24 +222,20 @@
     if (!ndisSelect) return;
 
     const toggle = () => {
-      const val = ndisSelect.value;
-      const showYes = val === "Yes";
-      const showNo = val === "No";
-
+      const yes = ndisSelect.value === "Yes";
       document
         .querySelectorAll(".yes-only")
-        .forEach((el) => (el.style.display = showYes ? "block" : "none"));
+        .forEach((el) => (el.style.display = yes ? "" : "none"));
       document
         .querySelectorAll(".no-only")
-        .forEach((el) => (el.style.display = showNo ? "block" : "none"));
+        .forEach((el) => (el.style.display = yes ? "none" : ""));
     };
 
     ndisSelect.addEventListener("change", toggle);
-    ndisSelect.addEventListener("input", toggle);
     toggle();
   }
 
-  /* -------------------- Age autofill -------------------- */
+  /* -------------------- Age autofill (editable) -------------------- */
   const parseYMD = (s) => {
     const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || "");
     if (!m) return null;
@@ -322,7 +264,7 @@
     const dobEl = elFor("child.dob");
     const ageEl = elFor("child.age");
     if (!dobEl || !ageEl) return;
-    ageEl.readOnly = true;
+    // Age remains editable
     ["input", "change", "blur"].forEach((evt) =>
       dobEl.addEventListener(evt, ensureAgeFromDob)
     );
@@ -342,10 +284,10 @@
   function validateStep(idx) {
     ensureAgeFromDob();
 
-    // clone because we'll push dynamic requirements
+    // clone because we may append dynamically
     const required = STEP_REQUIRED[idx] ? [...STEP_REQUIRED[idx]] : [];
 
-    // Dynamic NDIS requirements for step 2
+    // dynamic rules for NDIS step
     if (idx === 2) {
       const yes = elFor("ndis.participantEligible")?.value === "Yes";
       if (yes) {
@@ -364,7 +306,8 @@
     required.forEach((name) => {
       if (OPTIONAL_FIELDS.has(name)) return;
       const el = elFor(name);
-      if (!el) return;
+      // ignore hidden fields (e.g., inside .yes-only/.no-only)
+      if (!el || !el.offsetParent) return;
 
       if (isCheckbox(name)) {
         if (!el.checked) {
@@ -376,7 +319,8 @@
       }
 
       if (isFile(name)) {
-        if (!el.dataset.s3key) {
+        // file inputs validated by presence of s3 keys
+        if (!el.dataset.s3key && !el.dataset.s3keys) {
           missing.push(readableName(name));
           markInvalid(el);
           firstInvalid ||= el;
@@ -440,7 +384,7 @@
     if (currentStep >= 0 && currentStep < steps.length) showStep(currentStep);
   };
 
-  /* -------------------- Reader mode -------------------- */
+  /* -------------------- Reader mode helpers -------------------- */
   function showAllReaderMode() {
     steps.forEach((s) => s.classList.add("active"));
     const prevBtn = document.querySelector('button[onclick="nextStep(-1)"]');
@@ -451,7 +395,7 @@
     if (saveBtn) saveBtn.style.display = "none";
   }
 
-  /* -------------------- Reader: run after DOM ready -------------------- */
+  /* -------------------- Reader: load & hydrate form -------------------- */
   async function loadForReader() {
     try {
       const qs = new URLSearchParams(location.search);
@@ -459,21 +403,21 @@
       if (!token) return;
 
       const res = await fetch(
-        `/api/form/view?token=${encodeURIComponent(token)}`
+        `${API_BASE}/form/view?token=${encodeURIComponent(token)}`
       );
       if (!res.ok) return;
 
       const payload = await res.json();
       const data = payload?.data || {};
 
-      // Hydrate text/checkbox/radio fields (skip file inputs!)
+      // hydrate scalar fields (skip file)
       Object.entries(data).forEach(([name, value]) => {
-        const input = elFor(name);
-        if (!input) return;
+        const input = document.querySelector(`[name="${name}"]`);
+        if (!input || input.type === "file") return;
 
         switch (input.type) {
           case "checkbox":
-            input.checked = !!value;
+            input.checked = Boolean(value);
             break;
           case "radio": {
             const radio = document.querySelector(
@@ -482,53 +426,54 @@
             if (radio) radio.checked = true;
             break;
           }
-          case "file":
-            // never set value on file inputs
-            break;
           default:
             input.value = value ?? "";
         }
       });
 
-      // 1) Replace ALL file inputs with a placeholder
+      // replace each file input with a placeholder
       const placeholders = new Map();
       document.querySelectorAll('input[type="file"][name]').forEach((input) => {
-        const ph = document.createElement("span");
-        ph.className = "form-control-plaintext text-muted d-block";
-        ph.textContent = "No file uploaded";
-        ph.dataset.field = input.name;
-        placeholders.set(input.name, ph);
-        input.replaceWith(ph);
+        const holder = document.createElement("div");
+        holder.className = "d-block";
+        holder.dataset.field = input.name;
+        holder.textContent = "No file uploaded";
+        placeholders.set(input.name, holder);
+        input.replaceWith(holder);
       });
 
-      // 2) For each uploaded file, swap placeholder with a signed link
+      // inject signed links for uploaded files
       const files = Array.isArray(payload?.fileKeys) ? payload.fileKeys : [];
-      for (const { field, key } of files) {
-        if (!field || !key) continue;
+      const byField = {};
+      files.forEach(({ field, key }) => {
+        if (!field || !key) return;
+        (byField[field] ||= []).push(key);
+      });
 
-        const fn = (key || "").split("/").pop() || readableName(field);
-        const a = document.createElement("a");
-        a.textContent = fn;
-        a.target = "_blank";
-        a.rel = "noopener";
-        a.className = "form-control-plaintext d-block";
+      for (const [field, keys] of Object.entries(byField)) {
+        const holder = placeholders.get(field);
+        if (!holder) continue;
 
-        try {
-          const r = await fetch(
-            `${API_BASE}/form/file-url?key=${encodeURIComponent(key)}`
-          );
-          const j = await r.json();
-          if (j?.ok && j.url) a.href = j.url;
-        } catch {
-          // keep text without href if presign fails
-        }
+        holder.innerHTML = "";
+        for (const key of keys) {
+          const fileName = key.split("/").pop() || "file";
+          const link = document.createElement("a");
+          link.textContent = fileName;
+          link.target = "_blank";
+          link.rel = "noopener";
+          link.className = "d-block";
 
-        const ph = placeholders.get(field);
-        if (ph) {
-          ph.replaceWith(a);
-        } else {
-          const near = elFor(field);
-          if (near && near.parentElement) near.parentElement.appendChild(a);
+          try {
+            const r = await fetch(
+              `${API_BASE}/form/file-url?key=${encodeURIComponent(key)}`
+            );
+            const j = await r.json();
+            link.href = j?.ok && j.url ? j.url : "#";
+            if (!j?.ok) link.textContent = `${fileName} (unavailable)`;
+          } catch {
+            link.textContent = `${fileName} (error)`;
+          }
+          holder.appendChild(link);
         }
       }
 
@@ -537,10 +482,11 @@
       );
     } catch (err) {
       console.error("Error loading reader form:", err);
+      showToast("Could not load submission.");
     }
   }
 
-  /* -------------------- Form submit blocker in reader -------------------- */
+  // block submission in reader
   grantForm?.addEventListener("submit", (e) => {
     if (isReader) {
       e.preventDefault();
@@ -548,22 +494,100 @@
     }
   });
 
-  /* -------------------- Draft logic (edit mode) -------------------- */
+  /* -------------------- Draft/Submit logic (edit mode) -------------------- */
+
+  // flexible saver: tries multiple endpoints and formats
+  async function trySaveDraft(payloadObj) {
+    const endpoints = [
+      `${API_BASE}/save-draft`,
+      `${API_BASE}/form/save-draft`,
+      `/api/form/save-draft`,
+      `/save-draft`,
+    ];
+
+    // FormData fallback
+    const fd = new FormData();
+    Object.entries(payloadObj).forEach(([k, v]) => fd.append(k, v));
+
+    let lastErr;
+
+    for (const url of endpoints) {
+      // try JSON
+      try {
+        const r1 = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payloadObj),
+        });
+        if (r1.ok) return { url, json: await r1.json() };
+
+        if (r1.status === 404 || r1.status === 415) {
+          const r2 = await fetch(url, { method: "POST", body: fd });
+          if (r2.ok) return { url, json: await r2.json() };
+          lastErr = new Error(`save-draft ${r2.status} @ ${url}`);
+        } else {
+          lastErr = new Error(`save-draft ${r1.status} @ ${url}`);
+        }
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    throw lastErr || new Error("save-draft failed");
+  }
+
+  // flexible presigner for uploads (GET with query or POST JSON) and endpoint fallbacks
+  async function getSignedUrl(field, token, mime) {
+    const qs = `field=${encodeURIComponent(field)}&token=${encodeURIComponent(
+      token
+    )}&type=${encodeURIComponent(mime)}`;
+
+    const endpoints = [
+      `${API_BASE}/generate-upload-url?${qs}`,
+      `${API_BASE}/form/generate-upload-url?${qs}`,
+      `/api/form/generate-upload-url?${qs}`,
+      `/form/generate-upload-url?${qs}`,
+    ];
+
+    // also try POST JSON form for servers that require it
+    const payload = { field, token, type: mime };
+
+    // 1) try GETs
+    for (const url of endpoints) {
+      try {
+        const r = await fetch(url, { method: "GET" });
+        if (r.ok) return await r.json(); // { url, key }
+      } catch {}
+    }
+
+    // 2) try POST JSON to same endpoints (drop query)
+    for (const base of [
+      `${API_BASE}/generate-upload-url`,
+      `${API_BASE}/form/generate-upload-url`,
+      `/api/form/generate-upload-url`,
+      `/form/generate-upload-url`,
+    ]) {
+      try {
+        const r = await fetch(base, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (r.ok) return await r.json();
+      } catch {}
+    }
+
+    throw new Error("Signed URL failed");
+  }
+
   if (!isReader) {
     async function ensureToken() {
       let token = localStorage.getItem("draftToken");
       if (token) return token;
-    
       const base = { step: currentStep };
-      try {
-        const { json } = await trySaveDraft(base);
-        token = json?.token;
-        if (token) localStorage.setItem("draftToken", token);
-        return token;
-      } catch (err) {
-        console.error("ensureToken error:", err);
-        throw err;
-      }
+      const { json } = await trySaveDraft(base);
+      token = json?.token;
+      if (token) localStorage.setItem("draftToken", token);
+      return token;
     }
 
     function validateDraftMin() {
@@ -589,15 +613,21 @@
       return true;
     }
 
-    // File upload handling
+    // File upload handling (multi-file, max 5)
     document.querySelectorAll('input[type="file"]').forEach((input) => {
       input.addEventListener("change", async () => {
-        const file = input.files[0];
+        const files = Array.from(input.files || []);
         delete input.dataset.s3key;
-        if (!file) return;
+        delete input.dataset.s3keys;
+
+        if (!files.length) return;
+        if (files.length > 5) {
+          showToast("You can upload up to 5 files only.");
+          input.value = "";
+          return;
+        }
 
         const fieldName = input.name;
-        const ext = file.name.split(".").pop().toLowerCase();
         const mimeMap = {
           pdf: "application/pdf",
           jpg: "image/jpeg",
@@ -607,84 +637,79 @@
           heic: "image/heic",
           heif: "image/heic",
         };
-        const mime = file.type || mimeMap[ext] || "";
-        if (!mime) return showToast("Unsupported file type.");
+        const s3keys = [];
 
-        try {
-          const token = await ensureToken();
-          const res = await fetch(
-            `${API_BASE}/generate-upload-url?field=${encodeURIComponent(
-              fieldName
-            )}&token=${encodeURIComponent(token)}&type=${encodeURIComponent(
-              mime
-            )}`
-          );
-          if (!res.ok) throw new Error("Signed URL failed");
-          const { url, key } = await res.json();
-          const up = await fetch(url, {
-            method: "PUT",
-            headers: { "Content-Type": mime },
-            body: file,
-          });
-          if (!up.ok) throw new Error("Upload failed");
-          input.dataset.s3key = key;
-          showToast("File uploaded.");
-        } catch (err) {
-          console.error(err);
-          showToast("Upload error.");
+        for (const file of files) {
+          const ext = (file.name.split(".").pop() || "").toLowerCase();
+          const mime = file.type || mimeMap[ext] || "";
+          if (!mime) {
+            showToast("Unsupported file type.");
+            return;
+          }
+          try {
+            const token = await ensureToken();
+            const { url, key } = await getSignedUrl(fieldName, token, mime);
+            if (!url || !key) throw new Error("Signed URL failed");
+            const up = await fetch(url, {
+              method: "PUT",
+              headers: { "Content-Type": mime },
+              body: file,
+            });
+            if (!up.ok) throw new Error("Upload failed");
+            s3keys.push(key);
+          } catch (err) {
+            console.error(err);
+            showToast("Upload error.");
+            return;
+          }
+        }
+
+        if (s3keys.length) {
+          // store both for compatibility
+          input.dataset.s3keys = s3keys.join(",");
+          input.dataset.s3key = s3keys.join(",");
+          showToast("Files uploaded.");
         }
       });
     });
 
     // Draft save
     window.saveStep = async function saveStep() {
-      clearAllInvalid?.(); // si existe en tu archivo
-    
-      // validación mínima para permitir guardar
-      const DRAFT_MIN_REQUIRED = ["parent1.firstName", "parent1.mobile", "parent1.email"];
-      const missing = [];
-      let firstInvalid = null;
-      DRAFT_MIN_REQUIRED.forEach((name) => {
-        const el = document.querySelector(`[name="${name}"]`);
-        if (!el) return;
-        const val = (el.value || "").trim();
-        const ok = name === "parent1.email" ? /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val) : !!val;
-        if (!ok) {
-          missing.push(name);
-          if (!firstInvalid) firstInvalid = el;
-          el.classList?.add("is-invalid");
-        }
-      });
-      if (missing.length) {
-        showToast(`Please complete: ${missing.join(", ")} to save your draft.`);
-        firstInvalid?.scrollIntoView({ behavior: "smooth", block: "center" });
-        firstInvalid?.focus();
-        return;
-      }
-    
-      // construimos payload: campos + s3keys de file inputs
+      clearAllInvalid();
+      if (!validateDraftMin()) return;
+
       const formData = new FormData(grantForm);
+
+      // replace file inputs with uploaded S3 keys (each as repeated field)
       document.querySelectorAll('input[type="file"]').forEach((input) => {
         if (formData.has(input.name)) formData.delete(input.name);
-        if (input.dataset.s3key) formData.append(input.name, input.dataset.s3key);
+        const keys =
+          (input.dataset.s3keys || input.dataset.s3key || "")
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean);
+        keys.forEach((key) => formData.append(input.name, key));
       });
-    
-      // lo convertimos a objeto plano para poder enviar JSON o FormData
-      const payload = {};
-      formData.forEach((v, k) => (payload[k] = v));
-      payload.step = currentStep;
-    
-      // si ya tenemos token, incluirlo
+
+      formData.append("step", currentStep);
       const existingToken = localStorage.getItem("draftToken");
-      if (existingToken) payload.token = existingToken;
-    
+      if (existingToken) formData.append("token", existingToken);
+
+      // send with flexible saver
+      const payloadObj = {};
+      formData.forEach((v, k) => {
+        // allow multiple values per name by repeating; the saver handles FormData
+        if (payloadObj[k] !== undefined) {
+          if (Array.isArray(payloadObj[k])) payloadObj[k].push(v);
+          else payloadObj[k] = [payloadObj[k], v];
+        } else {
+          payloadObj[k] = v;
+        }
+      });
       try {
-        const { json } = await trySaveDraft(payload); // ← usa helper con fallbacks
-    
-        // guardar/actualizar token
+        const { json } = await trySaveDraft(payloadObj);
         const tokenFromResp = json?.token || existingToken;
         if (json?.token) localStorage.setItem("draftToken", json.token);
-    
         console.log("✅ Draft saved:", tokenFromResp);
         showToast("Draft saved.");
       } catch (err) {
@@ -699,20 +724,28 @@
       if (!validateAllBeforeSubmit()) return;
 
       const formData = new FormData(grantForm);
+
+      // attach each S3 key individually instead of File
       document.querySelectorAll('input[type="file"]').forEach((input) => {
         if (formData.has(input.name)) formData.delete(input.name);
-        if (input.dataset.s3key)
-          formData.append(input.name, input.dataset.s3key);
+        const keys =
+          (input.dataset.s3keys || input.dataset.s3key || "")
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean);
+        keys.forEach((key) => formData.append(input.name, key));
       });
+
       const existingToken = localStorage.getItem("draftToken");
       if (existingToken) formData.append("token", existingToken);
 
       try {
-        const res = await fetch(`${API_BASE}/submit-form`, {
+        const res = await fetch(`${API_BASE}/form/submit-form`, {
           method: "POST",
           body: formData,
         });
         if (!res.ok) throw new Error("Submit failed");
+
         localStorage.removeItem("draftToken");
         Object.keys(localStorage)
           .filter((k) => k.startsWith("resumeSent:"))
@@ -746,60 +779,13 @@
   /* -------------------- Initial render -------------------- */
   document.addEventListener("DOMContentLoaded", async () => {
     if (isReader) {
-      // reader-only setup after DOM is ready
-      if (submitBtn) submitBtn.style.display = "none";
-      if (saveBtn) saveBtn.style.display = "none";
+      showAllReaderMode();
       document
         .querySelectorAll("input, textarea, select")
         .forEach((el) => (el.disabled = true));
-      showAllReaderMode();
       await loadForReader();
       return;
     }
-
-    // edit mode: if we just resumed, hydrate draft (cookie sent automatically)
-    const params = new URLSearchParams(location.search);
-    if (params.get("resumed")) {
-      try {
-        const res = await fetch(`${API_BASE}/resume/get-draft`, {
-          method: "GET",
-          credentials: "include",
-        });
-        if (!res.ok) throw new Error(`get-draft ${res.status}`);
-        const payload = await res.json();
-
-        // flatten nested data into dot-notation keys
-        const flatten = (obj, prefix = "", res = {}) => {
-          for (const [k, v] of Object.entries(obj)) {
-            const key = prefix ? `${prefix}.${k}` : k;
-            if (v && typeof v === "object" && !Array.isArray(v)) {
-              flatten(v, key, res);
-            } else {
-              res[key] = v;
-            }
-          }
-          return res;
-        };
-        const flat = flatten(payload);
-
-        Object.entries(flat).forEach(([name, value]) => {
-          const input = elFor(name);
-          if (!input) return;
-          if (input.type === "checkbox") {
-            input.checked = Boolean(value);
-          } else {
-            input.value = value ?? "";
-          }
-        });
-
-        if (typeof flat.step === "number") currentStep = flat.step;
-      } catch (err) {
-        console.error("Error loading draft:", err);
-        showToast("Could not load your draft.");
-      }
-    }
-
-    // Initialize NDIS toggle after any hydration so it reflects current value
     initNdisToggle();
     showStep(currentStep);
   });
