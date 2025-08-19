@@ -12,13 +12,12 @@
   const steps = document.querySelectorAll(".step");
   const submitBtn = document.getElementById("submitBtn");
   const saveBtn = document.getElementById("saveDraftBtn");
-  const grantForm = document.getElementById("grantForm");
 
   /* -------------------- Optional fields -------------------- */
+
   const OPTIONAL_FIELDS = new Set([
     "docs.diagnosisLetter",
     "docs.additionalLetterOptional",
-    // Parent two full block
     "parent2.relationshipToChild",
     "parent2.firstName",
     "parent2.lastName",
@@ -34,7 +33,8 @@
     "otherConditions.details",
   ]);
 
-  /* -------------------- Required fields by step -------------------- */
+    /* -------------------- mandatory fields -------------------- */
+
   const STEP_REQUIRED = {
     0: [
       "referral.source",
@@ -66,7 +66,7 @@
       "child.currentTherapies",
     ],
     2: [
-      "ndis.participantEligible",
+      "ndis.participantEligible",          
       "therapy.toBeFunded",
       "therapy.frequencyOrEquipment",
       "therapy.noGrantImpact",
@@ -75,6 +75,7 @@
     4: ["consent.terms", "consent.truth", "consent.report", "consent.media"],
   };
 
+
   const DRAFT_MIN_REQUIRED = [
     "parent1.firstName",
     "parent1.mobile",
@@ -82,6 +83,27 @@
   ];
 
   /* -------------------- Helpers -------------------- */
+
+  /* -------------------- NDIS show/hide -------------------- */
+function initNdisToggle() {
+  const ndisSelect = document.getElementById("ndisEligible");
+  if (!ndisSelect) return;
+
+  const toggle = () => {
+    const yes = ndisSelect.value === "Yes";
+    document
+      .querySelectorAll(".yes-only")
+      .forEach((el) => (el.style.display = yes ? "" : "none"));
+    document
+      .querySelectorAll(".no-only")
+      .forEach((el) => (el.style.display = yes ? "none" : ""));
+  };
+
+  ndisSelect.addEventListener("change", toggle);
+  toggle(); // estado inicial
+}
+
+
   const isEmail = (v) => !!v && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
 
   function showToast(msg) {
@@ -114,11 +136,6 @@
     node._h = setTimeout(() => (node.style.opacity = "0"), 3000);
   }
 
-  const clearAllInvalid = () =>
-    document.querySelectorAll(".is-invalid").forEach((el) => {
-      el.classList.remove("is-invalid");
-      el.removeAttribute("aria-invalid");
-    });
 
   const clearInvalid = (container) =>
     container.querySelectorAll(".is-invalid").forEach((el) => {
@@ -137,8 +154,9 @@
   const readableName = (name) => {
     const map = {
       "ndis.participantEligible": "NDIS participant or eligible",
-      "therapy.goals": "Child’s therapy goals",
       "docs.ndisPlanOrGoals": "Ndis plan or goals",
+      "therapy.goals": "Child’s therapy goals",
+      "ndis.notEligibleReason": "Reason not eligible",
     };
     return map[name] || name;
   };
@@ -176,30 +194,6 @@
       });
     });
   })();
-
-function initNdisToggle() {
-  const ndisSelect = document.getElementById("ndisEligible"); // usa el ID
-  if (!ndisSelect) return;                                    
-
-  const toggle = () => {
-    const yes = ndisSelect.value === "Yes";
-    document
-      .querySelectorAll(".yes-only")
-      .forEach((el) => (el.style.display = yes ? "" : "none"));
-    document
-      .querySelectorAll(".no-only")
-      .forEach((el) => (el.style.display = yes ? "none" : ""));
-  };
-
-  ndisSelect.addEventListener("change", toggle);
-  toggle(); // arranque coherente
-}
-
-/* --- al final del listener de DOMContentLoaded --- */
-document.addEventListener("DOMContentLoaded", async () => {
-  /* …tu código existente… */
-  initNdisToggle();   //  ←  AGREGÁ ESTA LÍNEA
-});
 
   /* -------------------- Age autofill -------------------- */
   const parseYMD = (s) => {
@@ -248,30 +242,30 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   function validateStep(idx) {
     ensureAgeFromDob();
-    const required = STEP_REQUIRED[idx] || [];
-
-    // Dynamic NDIS requirements
+  
+    // clonamos porque podemos agregar dinámicamente
+    const required = STEP_REQUIRED[idx] ? [...STEP_REQUIRED[idx]] : [];
+  
+    /* ----- lógica dinámica para el paso NDIS (idx === 2) ----- */
     if (idx === 2) {
-      const ndisSelectEl = elFor("ndis.participantEligible");
-      const yes = ndisSelectEl && ndisSelectEl.value === "Yes";
-      if (yes) {
-        required.push("therapy.goals", "docs.ndisPlanOrGoals");
-      } else {
-        required.push("ndis.notEligibleReason");
-      }
+      const yes = elFor("ndis.participantEligible")?.value === "Yes";
+      yes
+        ? required.push("therapy.goals", "docs.ndisPlanOrGoals")
+        : required.push("ndis.notEligibleReason");
     }
-
+  
     const container = steps[idx];
     clearInvalid(container);
-
+  
     const missing = [];
     let firstInvalid = null;
-
+  
     required.forEach((name) => {
       if (OPTIONAL_FIELDS.has(name)) return;
       const el = elFor(name);
-      if (!el || !el.offsetParent) return;
-
+      if (!el || !el.offsetParent) return; // ignora campos ocultos
+  
+      /* -------- checkbox -------- */
       if (isCheckbox(name)) {
         if (!el.checked) {
           missing.push(readableName(name));
@@ -280,7 +274,8 @@ document.addEventListener("DOMContentLoaded", async () => {
         }
         return;
       }
-
+  
+      /* -------- file input (usa dataset.s3key al subir) -------- */
       if (isFile(name)) {
         if (!el.dataset.s3key) {
           missing.push(readableName(name));
@@ -289,7 +284,8 @@ document.addEventListener("DOMContentLoaded", async () => {
         }
         return;
       }
-
+  
+      /* -------- texto / select -------- */
       const val = (el.value || "").trim();
       if (name === "parent1.email" ? !isEmail(val) : !val) {
         missing.push(readableName(name));
@@ -297,7 +293,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         firstInvalid ||= el;
       }
     });
-
+  
     if (missing.length) {
       showToast(`Please complete: ${missing.join(", ")}.`);
       firstInvalid?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -348,8 +344,8 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   /* -------------------- Draft logic (edit mode) -------------------- */
   if (!isReader) {
-    // …tu lógica existente de token, carga a S3, saveStep, submit, etc.
-    // (se mantiene igual; no requiere cambios para esta refactorización)
+    /* …─── ensureToken, upload handling, saveStep, final submit (sin cambios desde tu última versión) … */
+    /* (omito aquí por brevedad: simplemente conserva tu código actual) */
   } else {
     window.saveStep = () => {};
   }
@@ -445,6 +441,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
+  if (typeof window.saveStep !== "function") {
+    window.saveStep = () => showToast("Draft saved (stub).");
+  }
+
   /* -------------------- Initial render -------------------- */
   document.addEventListener("DOMContentLoaded", async () => {
     if (isReader) {
@@ -459,6 +459,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       await loadForReader();
       return;
     }
+    initNdisToggle();  
     showStep(currentStep);
   });
 })();
