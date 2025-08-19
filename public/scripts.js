@@ -755,19 +755,29 @@ async function resumeExchangeAndHydrate(rt) {
 }
 
 async function hydrateFromCookieIfAny() {
+  const url = new URL(location.href);
+  const allowOnce =
+    url.searchParams.get("resumed") === "1" ||
+    localStorage.getItem("resume:allowCookieHydrate") === "1";
+
+  if (!allowOnce) return false;
+
+  // one-shot: consumimos el flag si estaba en localStorage
+  localStorage.removeItem("resume:allowCookieHydrate");
+
   try {
     const who = await fetch(`${API_BASE}/resume/whoami`, {
       credentials: "include",
       headers: { Accept: "application/json" },
-    }).then(r => r.json()).catch(() => ({}));
+    }).then((r) => r.json()).catch(() => ({}));
 
     const token = who?.token;
     if (!token) return false;
+
     localStorage.setItem("draftToken", token);
     await hydrateFromTokenEdit(token);
 
-    // limpiar ?resumed=1 si vino en la URL
-    const url = new URL(location.href);
+    // limpiar el marcador de la URL si vino por query
     if (url.searchParams.has("resumed")) {
       url.searchParams.delete("resumed");
       history.replaceState({}, "", url.toString());
@@ -1323,28 +1333,30 @@ window.saveStep = async function saveStep() {
 document.addEventListener("DOMContentLoaded", async () => {
   if (isReader) {
     showAllReaderMode();
-    await loadForReader();  // hidrata primero
-    // deshabilitar después de hidratar para no interferir con los toggles
-    document.querySelectorAll("input, textarea, select").forEach(el => el.disabled = true);
+    document.querySelectorAll("input, textarea, select").forEach((el) => (el.disabled = true));
+    await loadForReader();
     return;
   }
 
-
-  const params = new URLSearchParams(location.search);
-  const rt = params.get("rt");
-  const tokenParam = params.get("token");
+  const url = new URL(location.href);
+  const rt = url.searchParams.get("rt");
+  const tokenParam = url.searchParams.get("token");
+  const hasResumedMarker = url.searchParams.get("resumed") === "1";
 
   if (rt) {
-    await resumeExchangeAndHydrate(rt);
+    await resumeExchangeAndHydrate(rt);        // JSON exchange → hidrata directo
   } else if (tokenParam) {
     localStorage.setItem("draftToken", tokenParam);
-    await hydrateFromTokenEdit(tokenParam);
-  } else {
-    // ← ESTE ERA EL HUECO: intentar por cookie cuando no hay params
+    await hydrateFromTokenEdit(tokenParam);    // resume explícito por token
+  } else if (hasResumedMarker || localStorage.getItem("resume:allowCookieHydrate") === "1") {
+    // Solo hidratar por cookie si viene del exchange con redirect (?resumed=1)
     await hydrateFromCookieIfAny();
-  }
+  } // else: NO hidratar nada automáticamente
 
   initNdisToggle();
   showStep(currentStep);
 });
+
+
+
 })();
