@@ -404,95 +404,95 @@ function initNdisToggle() {
   }
 
   /* -------------------- Reader: load & hydrate form -------------------- */
-  async function loadForReader() {
-    try {
-      const qs = new URLSearchParams(location.search);
-      const token = qs.get("token");
-      if (!token) return;
+  /* -------------------- Reader: load & hydrate form -------------------- */
+async function loadForReader() {
+  try {
+    const qs = new URLSearchParams(location.search);
+    const token = qs.get("token");
+    if (!token) return;
 
-      const res = await fetch(
-        `${API_BASE}/form/view?token=${encodeURIComponent(token)}`
-      );
-      if (!res.ok) return;
+    const res = await fetch(
+      `${API_BASE}/form/view?token=${encodeURIComponent(token)}`,
+      { credentials: "include" }
+    );
+    if (!res.ok) { console.warn("reader view failed", res.status); return; }
 
-      const payload = await res.json();
-      const data = payload?.data || {};
+    const payload = await res.json().catch(() => ({}));
+    const data =
+      payload?.data ??
+      payload?.fields ??
+      payload?.form ??
+      payload?.record ??
+      (typeof payload === "object" ? payload : {}) ?? {};
 
-      // hydrate scalar fields (skip file)
-      Object.entries(data).forEach(([name, value]) => {
-        const input = document.querySelector(`[name="${name}"]`);
-        if (!input || input.type === "file") return;
+    // Escalares (skip file)
+    Object.entries(data).forEach(([name, value]) => {
+      const input = document.querySelector(`[name="${name}"]`);
+      if (!input || input.type === "file") return;
 
-        switch (input.type) {
-          case "checkbox":
-            input.checked = Boolean(value);
-            break;
-          case "radio": {
-            const radio = document.querySelector(
-              `input[name="${name}"][value="${value}"]`
-            );
-            if (radio) radio.checked = true;
-            break;
-          }
-          default:
-            input.value = value ?? "";
-        }
-      });
-
-      // replace each file input with a placeholder
-      const placeholders = new Map();
-      document.querySelectorAll('input[type="file"][name]').forEach((input) => {
-        const holder = document.createElement("div");
-        holder.className = "d-block";
-        holder.dataset.field = input.name;
-        holder.textContent = "No file uploaded";
-        placeholders.set(input.name, holder);
-        input.replaceWith(holder);
-      });
-
-      // inject signed links for uploaded files
-      const files = Array.isArray(payload?.fileKeys) ? payload.fileKeys : [];
-      const byField = {};
-      files.forEach(({ field, key }) => {
-        if (!field || !key) return;
-        (byField[field] ||= []).push(key);
-      });
-
-      for (const [field, keys] of Object.entries(byField)) {
-        const holder = placeholders.get(field);
-        if (!holder) continue;
-
-        holder.innerHTML = "";
-        for (const key of keys) {
-          const fileName = key.split("/").pop() || "file";
-          const link = document.createElement("a");
-          link.textContent = fileName;
-          link.target = "_blank";
-          link.rel = "noopener";
-          link.className = "d-block";
-
-          try {
-            const r = await fetch(
-              `${API_BASE}/form/file-url?key=${encodeURIComponent(key)}`
-            );
-            const j = await r.json();
-            link.href = j?.ok && j.url ? j.url : "#";
-            if (!j?.ok) link.textContent = `${fileName} (unavailable)`;
-          } catch {
-            link.textContent = `${fileName} (error)`;
-          }
-          holder.appendChild(link);
-        }
+      if (input.type === "checkbox") {
+        input.checked = Boolean(value);
+      } else if (input.type === "radio") {
+        const radio = document.querySelector(`input[name="${name}"][value="${value}"]`);
+        if (radio) radio.checked = true;
+      } else {
+        input.value = value ?? "";
       }
+    });
 
-      showToast(
-        payload.type === "submitted" ? "Viewing submission." : "Viewing draft."
-      );
-    } catch (err) {
-      console.error("Error loading reader form:", err);
-      showToast("Could not load submission.");
+    // Placeholders para archivos
+    const placeholders = new Map();
+    document.querySelectorAll('input[type="file"][name]').forEach((input) => {
+      const holder = document.createElement("div");
+      holder.className = "d-block";
+      holder.dataset.field = input.name;
+      holder.textContent = "No file uploaded";
+      placeholders.set(input.name, holder);
+      input.replaceWith(holder);
+    });
+
+    // Links firmados
+    const files = Array.isArray(payload?.fileKeys) ? payload.fileKeys : [];
+    const byField = {};
+    files.forEach(({ field, key }) => {
+      if (!field || !key) return;
+      (byField[field] ||= []).push(key);
+    });
+
+    for (const [field, keys] of Object.entries(byField)) {
+      const holder = placeholders.get(field);
+      if (!holder) continue;
+      holder.innerHTML = "";
+      for (const key of keys) {
+        const fileName = key.split("/").pop() || "file";
+        const link = document.createElement("a");
+        link.textContent = fileName;
+        link.target = "_blank";
+        link.rel = "noopener";
+        link.className = "d-block";
+        try {
+          const r = await fetch(
+            `${API_BASE}/form/file-url?key=${encodeURIComponent(key)}`,
+            { credentials: "include" }
+          );
+          const j = await r.json().catch(() => ({}));
+          link.href = j?.ok && j.url ? j.url : "#";
+          if (!j?.ok) link.textContent = `${fileName} (unavailable)`;
+        } catch {
+          link.textContent = `${fileName} (error)`;
+        }
+        holder.appendChild(link);
+      }
     }
+
+    showToast(
+      payload.type === "submitted" ? "Viewing submission." : "Viewing draft."
+    );
+  } catch (err) {
+    console.error("Error loading reader form:", err);
+    showToast("Could not load submission.");
   }
+}
 
   // block submission in reader
   grantForm?.addEventListener("submit", (e) => {
@@ -503,6 +503,7 @@ function initNdisToggle() {
   });
 
   /* ---- Edit-mode: hydrate by token (resume) ---- */
+/* ---- Edit-mode: hydrate by token (resume) ---- */
 async function hydrateFromTokenEdit(token) {
   const qs = `token=${encodeURIComponent(token)}`;
   const urls = [
@@ -514,15 +515,26 @@ async function hydrateFromTokenEdit(token) {
   let payload = null;
   for (const url of urls) {
     try {
-      const r = await fetch(url);
-      if (r.ok) { payload = await r.json(); break; }
-    } catch {}
+      const r = await fetch(url, { credentials: "include" });
+      if (!r.ok) { console.warn("resume view failed", r.status, url); continue; }
+      // tolerante al shape
+      const j = await r.json().catch(() => ({}));
+      payload = j || {};
+      break;
+    } catch (e) {
+      console.warn("resume view error", e);
+    }
   }
   if (!payload) { console.warn("resume view not available"); return; }
 
-  const data = payload?.data || {};
+  const data =
+    payload?.data ??
+    payload?.fields ??
+    payload?.form ??
+    payload?.record ??
+    (typeof payload === "object" ? payload : {}) ?? {};
 
-  // Campos escalares
+  // Escalares
   Object.entries(data).forEach(([name, value]) => {
     const input = document.querySelector(`[name="${name}"]`);
     if (!input || input.type === "file") return;
@@ -537,7 +549,7 @@ async function hydrateFromTokenEdit(token) {
     }
   });
 
-  // Cargar claves de archivos en data-* para conservar inputs editables
+  // Archivos → cargar keys en data-* (mantener inputs editables)
   const files = Array.isArray(payload?.fileKeys) ? payload.fileKeys : [];
   const byField = {};
   files.forEach(({ field, key }) => {
@@ -549,11 +561,11 @@ async function hydrateFromTokenEdit(token) {
     if (input) {
       const joined = keys.join(",");
       input.dataset.s3keys = joined;
-      input.dataset.s3key  = joined; // compat
+      input.dataset.s3key  = joined;
     }
   });
 
-  // Reaplicar toggle por si vino NDIS del servidor
+  // Reaplicar toggle si vino NDIS
   document.getElementById("ndisEligible")
     ?.dispatchEvent(new Event("change", { bubbles: true }));
 }
@@ -1002,6 +1014,7 @@ window.saveStep = async function saveStep() {
   };
 
   /* -------------------- Initial render -------------------- */
+/* -------------------- Initial render -------------------- */
 document.addEventListener("DOMContentLoaded", async () => {
   if (isReader) {
     showAllReaderMode();
@@ -1012,9 +1025,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     return;
   }
 
-  initNdisToggle();
-
-  // Reanudar por token en modo edición
+  // Reanudar por token en modo edición (hidratar antes del toggle)
   const params = new URLSearchParams(location.search);
   const tokenParam = params.get("token");
   if (tokenParam) {
@@ -1022,6 +1033,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     await hydrateFromTokenEdit(tokenParam);
   }
 
+  initNdisToggle(); // ahora sí, después de hidratar
   showStep(currentStep);
 });
 })();
