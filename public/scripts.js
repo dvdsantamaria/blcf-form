@@ -501,9 +501,25 @@ async function loadForReader() {
       showToast("Viewing only.");
     }
   });
+/* ---------- util: aplanar objetos anidados a notación con puntos ---------- */
+function flatten(obj, prefix = "", out = {}) {
+  for (const [k, v] of Object.entries(obj || {})) {
+    const key = prefix ? `${prefix}.${k}` : k;
+    if (
+      v &&
+      typeof v === "object" &&
+      !Array.isArray(v) &&
+      !(v instanceof File)
+    ) {
+      flatten(v, key, out);
+    } else {
+      out[key] = v;
+    }
+  }
+  return out;
+}
 
-  /* ---- Edit-mode: hydrate by token (resume) ---- */
-/* ---- Edit-mode: hydrate by token (resume) ---- */
+/* ---------- Edit-mode: hidratar formulario usando el token ---------- */
 async function hydrateFromTokenEdit(token) {
   const qs = `token=${encodeURIComponent(token)}`;
   const urls = [
@@ -516,40 +532,52 @@ async function hydrateFromTokenEdit(token) {
   for (const url of urls) {
     try {
       const r = await fetch(url, { credentials: "include" });
-      if (!r.ok) { console.warn("resume view failed", r.status, url); continue; }
-      // tolerante al shape
-      const j = await r.json().catch(() => ({}));
-      payload = j || {};
+      if (!r.ok) {
+        console.warn("resume view failed", r.status, url);
+        continue;
+      }
+      payload = (await r.json().catch(() => ({}))) || {};
       break;
     } catch (e) {
       console.warn("resume view error", e);
     }
   }
-  if (!payload) { console.warn("resume view not available"); return; }
+  if (!payload) {
+    console.warn("resume view not available");
+    return;
+  }
 
-  const data =
+  // admite varios shapes y aplana
+  const raw =
     payload?.data ??
     payload?.fields ??
     payload?.form ??
     payload?.record ??
-    (typeof payload === "object" ? payload : {}) ?? {};
+    payload;
+  const data = flatten(raw);
 
-  // Escalares
+  /* ----------- hidratar campos escalares ----------- */
   Object.entries(data).forEach(([name, value]) => {
     const input = document.querySelector(`[name="${name}"]`);
     if (!input || input.type === "file") return;
 
-    if (input.type === "checkbox") {
-      input.checked = Boolean(value);
-    } else if (input.type === "radio") {
-      const radio = document.querySelector(`input[name="${name}"][value="${value}"]`);
-      if (radio) radio.checked = true;
-    } else {
-      input.value = value ?? "";
+    switch (input.type) {
+      case "checkbox":
+        input.checked = Boolean(value);
+        break;
+      case "radio": {
+        const radio = document.querySelector(
+          `input[name="${name}"][value="${value}"]`
+        );
+        if (radio) radio.checked = true;
+        break;
+      }
+      default:
+        input.value = value ?? "";
     }
   });
 
-  // Archivos → cargar keys en data-* (mantener inputs editables)
+  /* ----------- hidratar archivos (mantener input editable) ----------- */
   const files = Array.isArray(payload?.fileKeys) ? payload.fileKeys : [];
   const byField = {};
   files.forEach(({ field, key }) => {
@@ -558,15 +586,15 @@ async function hydrateFromTokenEdit(token) {
   });
   Object.entries(byField).forEach(([field, keys]) => {
     const input = document.querySelector(`input[type="file"][name="${field}"]`);
-    if (input) {
-      const joined = keys.join(",");
-      input.dataset.s3keys = joined;
-      input.dataset.s3key  = joined;
-    }
+    if (!input) return;
+    const joined = keys.join(",");
+    input.dataset.s3keys = joined;
+    input.dataset.s3key = joined; // compat
   });
 
-  // Reaplicar toggle si vino NDIS
-  document.getElementById("ndisEligible")
+  /* ----------- volver a aplicar el toggle de NDIS ----------- */
+  document
+    .getElementById("ndisEligible")
     ?.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
