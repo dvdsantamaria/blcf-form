@@ -887,7 +887,6 @@ if (!isReader) {
   };
 
   /* -------------------- Initial render -------------------- */
- /* -------------------- Initial render -------------------- */
 document.addEventListener("DOMContentLoaded", async () => {
   if (isReader) {
     showAllReaderMode();
