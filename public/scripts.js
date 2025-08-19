@@ -519,31 +519,50 @@ function flatten(obj, prefix = "", out = {}) {
   return out;
 }
 /* ---------- resume-exchange → hydrate ---------- */
+/* ---------- resume-exchange → hydrate ---------- */
 async function resumeExchangeAndHydrate(rt) {
   if (!rt) return;
 
   try {
-    // 1) canjea el rt por un token normal
+    /* 1. canjeamos el rt por un token “normal”  -------------------- */
     const url = `${API_BASE}/resume/exchange?rt=${encodeURIComponent(rt)}`;
-    const res  = await fetch(url, { credentials: "include" });
-    if (!res.ok) {
-      console.warn("resume exchange failed", res.status);
-      showToast("Could not resume draft.");
-      return;
-    }
-    const j = await res.json().catch(() => ({}));
-    const token = j?.token || j?.draftToken || j?.id;
-    if (!token) {
-      console.warn("exchange response without token", j);
-      showToast("Invalid resume link.");
-      return;
+    const res = await fetch(url, {
+      credentials: "include",
+      headers: { Accept: "application/json" },   // fuerza respuesta JSON
+    });
+
+    /* --- A) el backend devolvió JSON directo --------------------- */
+    if (res.ok && res.headers.get("content-type")?.includes("json")) {
+      const j = await res.json().catch(() => ({}));
+      const token = j?.token || j?.draftToken || j?.id;
+      if (token) {
+        localStorage.setItem("draftToken", token);
+        await hydrateFromTokenEdit(token);
+      } else {
+        console.warn("exchange response without token", j);
+        showToast("Invalid resume link.");
+        return;
+      }
+    } else {
+      /* --- B) el backend redirigió → tenemos la cookie “resume” ---- */
+      console.info("resume-exchange returned HTML/redirect, using cookie");
+
+      const who = await fetch(`${API_BASE}/resume/whoami`, {
+        credentials: "include",
+        headers: { Accept: "application/json" },
+      }).then(r => r.json()).catch(() => ({}));
+
+      const token = who?.token;
+      if (!token) {
+        console.warn("whoami: no token in cookie");
+        showToast("Could not resume draft.");
+        return;
+      }
+      localStorage.setItem("draftToken", token);
+      await hydrateFromTokenEdit(token);
     }
 
-    // 2) guarda y llama al hidrator clásico
-    localStorage.setItem("draftToken", token);
-    await hydrateFromTokenEdit(token);
-
-    // 3) limpia la URL (sin recargar la página)
+    /* 2. limpiamos la URL (quitamos rt=) sin recargar la página ---- */
     const clean = new URL(location.href);
     clean.searchParams.delete("rt");
     history.replaceState({}, "", clean.toString());
@@ -552,7 +571,6 @@ async function resumeExchangeAndHydrate(rt) {
     showToast("Resume link error.");
   }
 }
-
 /* ---------- Edit-mode: hidratar formulario usando el token ---------- */
 async function hydrateFromTokenEdit(token) {
   const qs = `token=${encodeURIComponent(token)}`;

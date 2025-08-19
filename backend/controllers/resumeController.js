@@ -154,10 +154,11 @@ export async function exchangeResumeToken(req, res) {
     });
 
     /* ---- responde según quién lo pide ---- */
-    const wantsJSON =
-      req.xhr ||
-      (req.headers.accept || "").includes("application/json") ||
-      req.headers["content-type"]?.includes("application/json");
+    const wantsJson =
+     req.xhr ||
+      req.headers.accept?.includes("application/json") ||
+      req.headers["sec-fetch-mode"] === "cors" ||
+      req.query.json === "1";
 
     if (wantsJSON) {
       // llamado vía fetch → devolver JSON para que el frontend hidrate
