@@ -555,111 +555,143 @@ function showAllReaderMode() {
   if (submitBtn) submitBtn.style.display = "none";
   if (saveBtn) saveBtn.style.display = "none";
 }
+/* Reader: aplica visibilidad de bloques NDIS según dato persistido */
+function applyNdisVisibilityForReader(flat) {
+  const v = String(flat["ndis.participantEligible"] || "").trim();
+  const showYes = v === "Yes";
+  const showNo  = v === "No";
+  document.querySelectorAll(".yes-only")
+    .forEach((el) => (el.style.display = showYes ? "block" : "none"));
+  document.querySelectorAll(".no-only")
+    .forEach((el) => (el.style.display = showNo ? "block" : "none"));
+}
 
-  /* -------------------- Reader: load & hydrate form -------------------- */
-  async function loadForReader() {
-    try {
-      const qs = new URLSearchParams(location.search);
-      const token = qs.get("token");
-      if (!token) return;
-  
-      const res = await fetch(
-        `${API_BASE}/resume/get-draft?token=${encodeURIComponent(token)}`,
-        { credentials: "include", headers: { Accept: "application/json" } }
-      );
-      if (!res.ok) { console.warn("reader view failed", res.status); return; }
-  
-      const payload = await res.json().catch(() => ({}));
-  
-      // shape tolerante + flatten
-      const raw =
-        payload?.data ??
-        payload?.fields ??
-        payload?.form ??
-        payload?.record ??
-        (typeof payload === "object" ? payload : {});
-      const flat = (obj, prefix = "", out = {}) => {
-        for (const [k, v] of Object.entries(obj || {})) {
-          const key = prefix ? `${prefix}.${k}` : k;
-          if (v && typeof v === "object" && !Array.isArray(v)) flat(v, key, out);
-          else out[key] = v;
-        }
-        return out;
-      };
-      const data = flat(raw);
-  
-      // 1) Hidratar escalares (no tocar file inputs)
-      Object.entries(data).forEach(([name, value]) => {
-        const input = document.querySelector(`[name="${name}"]`);
-        if (!input || input.type === "file") return;
-  
-        if (input.type === "checkbox") {
-          input.checked = Boolean(value);
-        } else if (input.type === "radio") {
-          const r = document.querySelector(`input[name="${name}"][value="${value}"]`);
-          if (r) r.checked = true;
-        } else {
-          input.value = value ?? "";
-        }
-      });
-  
-      // 2) Recolectar keys desde payload.fileKeys y desde los campos del draft
-      const byField = collectFileKeysByField(payload, data);
-  
-      // 3) Reemplazar cada input file por un placeholder renderizando la lista
-      document.querySelectorAll('input[type="file"][name]').forEach((input) => {
-        const field = input.name;
-        const keys = byField[field] || [];
-  
-        const holder = document.createElement("div");
-        holder.className = "uploaded-list mt-1";
-        if (!keys.length) {
-          holder.textContent = "No file uploaded";
-        } else {
-          keys.forEach(async (k) => {
-            const wrap = document.createElement("div");
-            wrap.className = "d-flex align-items-center gap-2 mb-1";
-  
-            const name = document.createElement("span");
-            name.className = "badge bg-secondary";
-            name.textContent = k.split("/").pop() || "file";
-  
-            const view = document.createElement("a");
-            view.textContent = "view";
-            view.className = "small";
-            view.target = "_blank";
-            view.rel = "noopener";
-  
-            try {
-              const r = await fetch(
-                `${API_BASE}/form/file-url?key=${encodeURIComponent(k)}`,
-                { credentials: "include", headers: { Accept: "application/json" } }
-              );
-              const j = await r.json().catch(() => ({}));
-              if (j?.ok && j.url) view.href = j.url;
-              else { view.href = "#"; view.textContent = "uploaded"; view.removeAttribute("target"); }
-            } catch {
-              view.href = "#"; view.textContent = "uploaded"; view.removeAttribute("target");
-            }
-  
-            wrap.append(name, view);
-            holder.appendChild(wrap);
-          });
-        }
-  
-        input.replaceWith(holder);
-      });
-  
-      // 4) Aplicar toggles dependientes y extras
-      initNdisToggle();     // revela .yes-only / .no-only según el valor hidratado
-      ensureAgeFromDob();   // por si hay DOB
-  
-      showToast(payload.type === "submitted" ? "Viewing submission." : "Viewing draft.");
-    } catch (err) {
-      console.error("Error loading reader form:", err);
-      showToast("Could not load submission.");
+/* -------------------- Reader: load & hydrate form (submission-first) -------------------- */
+async function loadForReader() {
+  try {
+    const token = new URLSearchParams(location.search).get("token");
+    if (!token) return;
+
+    const qs = `token=${encodeURIComponent(token)}`;
+    const urls = [
+      `${API_BASE}/form/view?${qs}`,   // ← submission (principal)
+      `/api/form/view?${qs}`,
+      `/form/view?${qs}`,
+      `${API_BASE}/resume/get-draft?${qs}` // último recurso: draft
+    ];
+
+    let payload = null;
+    for (const url of urls) {
+      try {
+        const r = await fetch(url, { credentials: "include", headers: { Accept: "application/json" }});
+        if (!r.ok) { console.warn("reader view failed", r.status, url); continue; }
+        payload = (await r.json().catch(() => ({}))) || {};
+        break;
+      } catch (e) {
+        console.warn("reader view error", e);
+      }
     }
+    if (!payload) { showToast("Could not load submission."); return; }
+
+    // tomar el cuerpo real sin importar forma
+    const raw =
+      payload?.data ??
+      payload?.fields ??
+      payload?.form ??
+      payload?.record ??
+      (typeof payload === "object" ? payload : {});
+
+    const flat = flatten(raw);
+    console.log("hydrate raw draft:", raw);
+    console.log("flattened draft data:", flat);
+
+    // ---- Escalares (skip file) ----
+    Object.entries(flat).forEach(([name, value]) => {
+      const input = document.querySelector(`[name="${name}"]`);
+      if (!input || input.type === "file") return;
+
+      if (input.type === "checkbox") {
+        input.checked = Boolean(value);
+      } else if (input.type === "radio") {
+        const radio = document.querySelector(`input[name="${name}"][value="${value}"]`);
+        if (radio) radio.checked = true;
+      } else {
+        input.value = value ?? "";
+      }
+    });
+
+    // ---- NDIS show/hide en modo reader según dato guardado ----
+    applyNdisVisibilityForReader(flat);
+
+    // ---- Archivos: reemplazar input por holder y listar keys ----
+    const holders = new Map();
+    document.querySelectorAll('input[type="file"][name]').forEach((input) => {
+      const holder = document.createElement("div");
+      holder.className = "uploaded-list mt-1";
+      holder.dataset.field = input.name;
+      holder.textContent = "No file uploaded";
+      input.replaceWith(holder);        // en reader no queremos el input
+      holders.set(input.name, holder);
+    });
+
+    // Usa fileKeys explícitos y/o valores crudos del draft (docs.*)
+    const byField = collectFileKeysByField(payload, flat);
+
+    for (const [field, keys] of Object.entries(byField)) {
+      const holder = holders.get(field);
+      if (!holder) continue;
+
+      holder.innerHTML = "";
+      if (!keys.length) {
+        holder.textContent = "No file uploaded";
+        continue;
+      }
+
+      for (const key of keys) {
+        const fileName = key.split("/").pop() || "file";
+        const row = document.createElement("div");
+        row.className = "d-flex align-items-center gap-2 mb-1";
+
+        const name = document.createElement("span");
+        name.className = "badge bg-secondary";
+        name.textContent = fileName;
+
+        const link = document.createElement("a");
+        link.className = "small";
+        link.target = "_blank";
+        link.rel = "noopener";
+        link.textContent = "view";
+
+        try {
+          const r = await fetch(
+            `${API_BASE}/form/file-url?key=${encodeURIComponent(key)}`,
+            { credentials: "include", headers: { Accept: "application/json" } }
+          );
+          const j = await r.json().catch(() => ({}));
+          if (j?.ok && j.url) {
+            link.href = j.url;
+          } else {
+            link.href = "#";
+            link.textContent = "uploaded";
+            link.removeAttribute("target");
+          }
+        } catch {
+          link.href = "#";
+          link.textContent = "uploaded";
+          link.removeAttribute("target");
+        }
+
+        row.append(name, link);
+        holder.appendChild(row);
+      }
+    }
+
+    showToast(payload.type === "submitted" ? "Viewing submission." : "Viewing draft.");
+  } catch (err) {
+    console.error("Error loading reader form:", err);
+    showToast("Could not load submission.");
   }
+}
 
   // block submission in reader
   grantForm?.addEventListener("submit", (e) => {
