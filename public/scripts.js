@@ -221,20 +221,20 @@
     const ndisSelect = document.getElementById("ndisEligible");
     if (!ndisSelect) return;
   
+    const show = (sel, on) =>
+      document.querySelectorAll(sel).forEach((el) => {
+        el.style.display = on ? "block" : "none";
+      });
+  
     const toggle = () => {
-      const yes = ndisSelect.value === "Yes";
-      document
-        .querySelectorAll(".yes-only")
-        .forEach((el) => (el.style.display = yes ? "block" : "none"));
-      document
-        .querySelectorAll(".no-only")
-        .forEach((el) => (el.style.display = yes ? "none" : "block"));
+      const v = ndisSelect.value;     
+      show(".yes-only", v === "Yes"); 
+      show(".no-only",  v === "No");  
     };
   
     ndisSelect.addEventListener("change", toggle);
-    toggle(); // estado inicial
+    toggle(); 
   }
-
   /* -------------------- Age autofill (editable) -------------------- */
   const parseYMD = (s) => {
     const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || "");
@@ -289,11 +289,11 @@
 
     // dynamic rules for NDIS step
     if (idx === 2) {
-      const yes = elFor("ndis.participantEligible")?.value === "Yes";
-      if (yes) {
+      const v = elFor("ndis.participantEligible")?.value;
+      if (v === "Yes") {
         required.push("therapy.goals", "docs.ndisPlanOrGoals");
-      } else {
-        required.push("ndis.notEligibleReason");
+      } else if (v === "No") {
+        required.push("ndis.notEligibleReason"); 
       }
     }
 
@@ -494,274 +494,321 @@
     }
   });
 
-  /* -------------------- Draft/Submit logic (edit mode) -------------------- */
+  /* -------------------- Draft logic (edit mode) -------------------- */
+if (!isReader) {
+  // Endpoints CONSISTENTES (prioritarios)
+  const ENDPOINTS = {
+    saveDraft: `${API_BASE}/form/save-draft`,
+    submit: `${API_BASE}/form/submit-form`,
+    uploadUrl: `${API_BASE}/form/generate-upload-url`,
+  };
 
-  // flexible saver: tries multiple endpoints and formats
-  async function trySaveDraft(payloadObj) {
-    const endpoints = [
-      `${API_BASE}/save-draft`,
-      `${API_BASE}/form/save-draft`,
-      `/api/form/save-draft`,
-      `/save-draft`,
-    ];
+  // Fallbacks conocidos
+  const SAVE_DRAFT_FALLBACKS = [
+    ENDPOINTS.saveDraft,
+    `${API_BASE}/save-draft`,
+    `/api/form/save-draft`,
+    `/save-draft`,
+  ];
+  const UPLOAD_URL_FALLBACKS_GET = [
+    ENDPOINTS.uploadUrl,
+    `${API_BASE}/generate-upload-url`,
+    `/api/form/generate-upload-url`,
+    `/form/generate-upload-url`,
+  ];
+  const SUBMIT_FALLBACKS = [
+    ENDPOINTS.submit,
+    `${API_BASE}/submit-form`,
+    `/api/form/submit-form`,
+    `/submit-form`,
+  ];
 
-    // FormData fallback
-    const fd = new FormData();
-    Object.entries(payloadObj).forEach(([k, v]) => fd.append(k, v));
+  const isEmail = (v) => !!v && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
+
+  function formDataToJSON(fd) {
+    const obj = {};
+    fd.forEach((v, k) => {
+      if (obj[k] === undefined) obj[k] = v;
+      else if (Array.isArray(obj[k])) obj[k].push(v);
+      else obj[k] = [obj[k], v];
+    });
+    return obj;
+  }
+
+  // Saver flexible: intenta JSON y luego FormData, con fallbacks
+  async function trySaveDraftFlexible(payload) {
+    const fd = payload instanceof FormData ? payload : (() => {
+      const f = new FormData();
+      Object.entries(payload || {}).forEach(([k, v]) => {
+        if (Array.isArray(v)) v.forEach((x) => f.append(k, x));
+        else f.append(k, v ?? "");
+      });
+      return f;
+    })();
+    const json = payload instanceof FormData ? formDataToJSON(fd) : payload;
 
     let lastErr;
-
-    for (const url of endpoints) {
-      // try JSON
-      try {
-        const r1 = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payloadObj),
-        });
-        if (r1.ok) return { url, json: await r1.json() };
-
-        if (r1.status === 404 || r1.status === 415) {
-          const r2 = await fetch(url, { method: "POST", body: fd });
-          if (r2.ok) return { url, json: await r2.json() };
-          lastErr = new Error(`save-draft ${r2.status} @ ${url}`);
-        } else {
-          lastErr = new Error(`save-draft ${r1.status} @ ${url}`);
-        }
-      } catch (e) {
-        lastErr = e;
+    for (const url of SAVE_DRAFT_FALLBACKS) {
+      // 1) JSON (si no venía como FormData)
+      if (!(payload instanceof FormData)) {
+        try {
+          const r1 = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(json),
+          });
+          if (r1.ok) return { url, json: await r1.json() };
+          if (![400, 404, 415].includes(r1.status)) {
+            lastErr = new Error(`save-draft ${r1.status} @ ${url}`);
+            continue;
+          }
+        } catch (e) { lastErr = e; }
       }
+      // 2) FormData
+      try {
+        const r2 = await fetch(url, { method: "POST", body: fd });
+        if (r2.ok) return { url, json: await r2.json() };
+        lastErr = new Error(`save-draft ${r2.status} @ ${url}`);
+      } catch (e) { lastErr = e; }
     }
     throw lastErr || new Error("save-draft failed");
   }
 
-  // flexible presigner for uploads (GET with query or POST JSON) and endpoint fallbacks
-  async function getSignedUrl(field, token, mime) {
-    const qs = `field=${encodeURIComponent(field)}&token=${encodeURIComponent(
-      token
-    )}&type=${encodeURIComponent(mime)}`;
+  // Presigner flexible: GET con query y POST JSON a fallbacks
+  async function getSignedUrlFlexible(field, token, mime) {
+    const qs = `field=${encodeURIComponent(field)}&token=${encodeURIComponent(token)}&type=${encodeURIComponent(mime)}`;
 
-    const endpoints = [
-      `${API_BASE}/generate-upload-url?${qs}`,
-      `${API_BASE}/form/generate-upload-url?${qs}`,
-      `/api/form/generate-upload-url?${qs}`,
-      `/form/generate-upload-url?${qs}`,
-    ];
-
-    // also try POST JSON form for servers that require it
-    const payload = { field, token, type: mime };
-
-    // 1) try GETs
-    for (const url of endpoints) {
+    // 1) GET con query
+    for (const base of UPLOAD_URL_FALLBACKS_GET) {
       try {
-        const r = await fetch(url, { method: "GET" });
+        const r = await fetch(`${base}?${qs}`, { method: "GET" });
         if (r.ok) return await r.json(); // { url, key }
       } catch {}
     }
-
-    // 2) try POST JSON to same endpoints (drop query)
-    for (const base of [
-      `${API_BASE}/generate-upload-url`,
-      `${API_BASE}/form/generate-upload-url`,
-      `/api/form/generate-upload-url`,
-      `/form/generate-upload-url`,
-    ]) {
+    // 2) POST JSON
+    for (const base of UPLOAD_URL_FALLBACKS_GET) {
       try {
         const r = await fetch(base, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
+          body: JSON.stringify({ field, token, type: mime }),
         });
         if (r.ok) return await r.json();
       } catch {}
     }
-
     throw new Error("Signed URL failed");
   }
 
-  if (!isReader) {
-    async function ensureToken() {
-      let token = localStorage.getItem("draftToken");
-      if (token) return token;
-      const base = { step: currentStep };
-      const { json } = await trySaveDraft(base);
-      token = json?.token;
-      if (token) localStorage.setItem("draftToken", token);
-      return token;
-    }
+  async function ensureToken() {
+    let token = localStorage.getItem("draftToken");
+    if (token) return token;
 
-    function validateDraftMin() {
-      const missing = [];
-      let firstInvalid = null;
-      DRAFT_MIN_REQUIRED.forEach((name) => {
-        const el = elFor(name);
-        if (!el) return;
-        const val = (el.value || "").trim();
-        const ok = name === "parent1.email" ? isEmail(val) : val.length > 0;
-        if (!ok) {
-          missing.push(readableName(name));
-          markInvalid(el);
-          firstInvalid ||= el;
-        }
-      });
-      if (missing.length) {
-        showToast(`Please complete: ${missing.join(", ")} to save your draft.`);
-        firstInvalid?.scrollIntoView({ behavior: "smooth", block: "center" });
-        firstInvalid?.focus();
-        return false;
+    // intento directo al endpoint consistente
+    const fd = new FormData();
+    fd.append("step", currentStep);
+    try {
+      const res = await fetch(ENDPOINTS.saveDraft, { method: "POST", body: fd });
+      if (res.ok) {
+        token = (await res.json()).token;
+        if (token) localStorage.setItem("draftToken", token);
+        return token;
       }
-      return true;
+    } catch {}
+
+    // fallback flexible
+    const { json } = await trySaveDraftFlexible(fd);
+    token = json?.token;
+    if (token) localStorage.setItem("draftToken", token);
+    return token;
+  }
+
+  function validateDraftMin() {
+    const missing = [];
+    let firstInvalid = null;
+    ["parent1.firstName", "parent1.mobile", "parent1.email"].forEach((name) => {
+      const el = document.querySelector(`[name="${name}"]`);
+      if (!el) return;
+      const v = (el.value || "").trim();
+      const ok = name === "parent1.email" ? isEmail(v) : v.length > 0;
+      if (!ok) {
+        missing.push(name);
+        el.classList.add("is-invalid");
+        firstInvalid ||= el;
+      }
+    });
+    if (missing.length) {
+      showToast("Please complete: First name, Mobile, Email to save your draft.");
+      firstInvalid?.focus();
+      return false;
     }
+    return true;
+  }
 
-    // File upload handling (multi-file, max 5)
-    document.querySelectorAll('input[type="file"]').forEach((input) => {
-      input.addEventListener("change", async () => {
-        const files = Array.from(input.files || []);
-        delete input.dataset.s3key;
-        delete input.dataset.s3keys;
+  // --- Upload multi-archivo (hasta 5) ---
+  document.querySelectorAll('input[type="file"]').forEach((input) => {
+    input.addEventListener("change", async () => {
+      const files = Array.from(input.files || []);
+      delete input.dataset.s3key;
+      delete input.dataset.s3keys;
+      if (!files.length) return;
+      if (files.length > 5) {
+        showToast("You can upload up to 5 files only.");
+        input.value = "";
+        return;
+      }
 
-        if (!files.length) return;
-        if (files.length > 5) {
-          showToast("You can upload up to 5 files only.");
-          input.value = "";
+      const fieldName = input.name;
+      const mimeMap = {
+        pdf: "application/pdf",
+        jpg: "image/jpeg",
+        jpeg: "image/jpeg",
+        png: "image/png",
+        webp: "image/webp",
+        heic: "image/heic",
+        heif: "image/heic",
+      };
+      const s3keys = [];
+
+      for (const file of files) {
+        const ext = (file.name.split(".").pop() || "").toLowerCase();
+        const mime = file.type || mimeMap[ext] || "";
+        if (!mime) { showToast("Unsupported file type."); return; }
+
+        try {
+          const token = await ensureToken();
+
+          // intento consistente primero
+          let presign;
+          try {
+            const r = await fetch(
+              `${ENDPOINTS.uploadUrl}?field=${encodeURIComponent(fieldName)}&token=${encodeURIComponent(token)}&type=${encodeURIComponent(mime)}`
+            );
+            if (r.ok) presign = await r.json();
+          } catch {}
+
+          // si falla, uso flexible
+          if (!presign || !presign.url || !presign.key) {
+            presign = await getSignedUrlFlexible(fieldName, token, mime);
+          }
+
+          const up = await fetch(presign.url, {
+            method: "PUT",
+            headers: { "Content-Type": mime },
+            body: file,
+          });
+          if (!up.ok) throw new Error("Upload failed");
+          s3keys.push(presign.key);
+        } catch (err) {
+          console.error(err);
+          showToast("Upload error.");
           return;
         }
+      }
 
-        const fieldName = input.name;
-        const mimeMap = {
-          pdf: "application/pdf",
-          jpg: "image/jpeg",
-          jpeg: "image/jpeg",
-          png: "image/png",
-          webp: "image/webp",
-          heic: "image/heic",
-          heif: "image/heic",
-        };
-        const s3keys = [];
+      if (s3keys.length) {
+        // guardamos en ambos por compatibilidad
+        input.dataset.s3keys = s3keys.join(",");
+        input.dataset.s3key = s3keys.join(",");
+        showToast("Files uploaded.");
+      }
+    });
+  });
 
-        for (const file of files) {
-          const ext = (file.name.split(".").pop() || "").toLowerCase();
-          const mime = file.type || mimeMap[ext] || "";
-          if (!mime) {
-            showToast("Unsupported file type.");
-            return;
-          }
-          try {
-            const token = await ensureToken();
-            const { url, key } = await getSignedUrl(fieldName, token, mime);
-            if (!url || !key) throw new Error("Signed URL failed");
-            const up = await fetch(url, {
-              method: "PUT",
-              headers: { "Content-Type": mime },
-              body: file,
-            });
-            if (!up.ok) throw new Error("Upload failed");
-            s3keys.push(key);
-          } catch (err) {
-            console.error(err);
-            showToast("Upload error.");
-            return;
-          }
-        }
+  // --- Guardar borrador ---
+  window.saveStep = async function saveStep() {
+    if (!validateDraftMin()) return;
 
-        if (s3keys.length) {
-          // store both for compatibility
-          input.dataset.s3keys = s3keys.join(",");
-          input.dataset.s3key = s3keys.join(",");
-          showToast("Files uploaded.");
-        }
-      });
+    const formEl = document.getElementById("grantForm");
+    const formData = new FormData(formEl);
+
+    // reemplaza Files por sus S3 keys (una entrada por key)
+    document.querySelectorAll('input[type="file"]').forEach((input) => {
+      if (formData.has(input.name)) formData.delete(input.name);
+      const keys = (input.dataset.s3keys || input.dataset.s3key || "")
+        .split(",").map((s) => s.trim()).filter(Boolean);
+      keys.forEach((k) => formData.append(input.name, k));
     });
 
-    // Draft save
-    window.saveStep = async function saveStep() {
-      clearAllInvalid();
-      if (!validateDraftMin()) return;
+    formData.append("step", currentStep);
+    const existingToken = localStorage.getItem("draftToken");
+    if (existingToken) formData.append("token", existingToken);
 
-      const formData = new FormData(grantForm);
-
-      // replace file inputs with uploaded S3 keys (each as repeated field)
-      document.querySelectorAll('input[type="file"]').forEach((input) => {
-        if (formData.has(input.name)) formData.delete(input.name);
-        const keys =
-          (input.dataset.s3keys || input.dataset.s3key || "")
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean);
-        keys.forEach((key) => formData.append(input.name, key));
-      });
-
-      formData.append("step", currentStep);
-      const existingToken = localStorage.getItem("draftToken");
-      if (existingToken) formData.append("token", existingToken);
-
-      // send with flexible saver
-      const payloadObj = {};
-      formData.forEach((v, k) => {
-        // allow multiple values per name by repeating; the saver handles FormData
-        if (payloadObj[k] !== undefined) {
-          if (Array.isArray(payloadObj[k])) payloadObj[k].push(v);
-          else payloadObj[k] = [payloadObj[k], v];
-        } else {
-          payloadObj[k] = v;
-        }
-      });
-      try {
-        const { json } = await trySaveDraft(payloadObj);
-        const tokenFromResp = json?.token || existingToken;
-        if (json?.token) localStorage.setItem("draftToken", json.token);
-        console.log("✅ Draft saved:", tokenFromResp);
+    // 1) intento directo
+    try {
+      const res = await fetch(ENDPOINTS.saveDraft, { method: "POST", body: formData });
+      if (res.ok) {
+        const j = await res.json();
+        if (j.token) localStorage.setItem("draftToken", j.token);
         showToast("Draft saved.");
-      } catch (err) {
-        console.error("save-draft error:", err);
-        showToast("Save draft failed.");
+        return;
       }
-    };
+    } catch {}
 
-    // Final submit
-    grantForm?.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      if (!validateAllBeforeSubmit()) return;
+    // 2) fallback flexible
+    try {
+      const { json } = await trySaveDraftFlexible(formData);
+      if (json?.token) localStorage.setItem("draftToken", json.token);
+      showToast("Draft saved.");
+    } catch (err) {
+      console.error("save-draft error:", err);
+      showToast("Save draft failed.");
+    }
+  };
 
-      const formData = new FormData(grantForm);
+  // --- Envío final ---
+  document.getElementById("grantForm")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!validateAllBeforeSubmit()) return;
 
-      // attach each S3 key individually instead of File
-      document.querySelectorAll('input[type="file"]').forEach((input) => {
-        if (formData.has(input.name)) formData.delete(input.name);
-        const keys =
-          (input.dataset.s3keys || input.dataset.s3key || "")
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean);
-        keys.forEach((key) => formData.append(input.name, key));
-      });
+    const formEl = document.getElementById("grantForm");
+    const formData = new FormData(formEl);
 
-      const existingToken = localStorage.getItem("draftToken");
-      if (existingToken) formData.append("token", existingToken);
+    document.querySelectorAll('input[type="file"]').forEach((input) => {
+      if (formData.has(input.name)) formData.delete(input.name);
+      const keys = (input.dataset.s3keys || input.dataset.s3key || "")
+        .split(",").map((s) => s.trim()).filter(Boolean);
+      keys.forEach((k) => formData.append(input.name, k));
+    });
 
-      try {
-        const res = await fetch(`${API_BASE}/form/submit-form`, {
-          method: "POST",
-          body: formData,
-        });
-        if (!res.ok) throw new Error("Submit failed");
+    const existingToken = localStorage.getItem("draftToken");
+    if (existingToken) formData.append("token", existingToken);
 
+    // 1) directo
+    try {
+      const res = await fetch(ENDPOINTS.submit, { method: "POST", body: formData });
+      if (res.ok) {
         localStorage.removeItem("draftToken");
-        Object.keys(localStorage)
-          .filter((k) => k.startsWith("resumeSent:"))
-          .forEach((k) => localStorage.removeItem(k));
-        currentStep = steps.length - 1; // thank you page
+        currentStep = steps.length - 1;
         showStep(currentStep);
         showToast("Submission received.");
-      } catch (err) {
-        console.error(err);
-        showToast("Submission failed.");
+        return;
       }
-    });
-  } else {
-    // Reader stub
-    window.saveStep = () => {};
-  }
+    } catch {}
+
+    // 2) fallbacks
+    let lastErr;
+    for (const url of SUBMIT_FALLBACKS) {
+      try {
+        const r = await fetch(url, { method: "POST", body: formData });
+        if (r.ok) {
+          localStorage.removeItem("draftToken");
+          currentStep = steps.length - 1;
+          showStep(currentStep);
+          showToast("Submission received.");
+          return;
+        }
+        lastErr = new Error(`submit ${r.status} @ ${url}`);
+      } catch (e) { lastErr = e; }
+    }
+    console.error(lastErr);
+    showToast("Submission failed.");
+  });
+} else {
+  window.saveStep = () => {};
+}
+
+
+
 
   /* -------------------- Dev helper -------------------- */
   window.devClearResumeSession = async function () {
