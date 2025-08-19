@@ -219,8 +219,8 @@ const elFor = (name) => document.querySelector(`[name="${name}"]`);
         ? el.previousElementSibling
         : (el.id ? document.querySelector(`label[for="${el.id}"]`) : null);
     if (!label) return;
-    label.innerHTML = label.textContent.replace(/\s*\(optional\)\s*/i, "");
-  })();
+    label.innerHTML = label.innerHTML.replace(/\s*\(optional\)\s*/i, "");
+    })();
 })();
 
 /* -------------------- NDIS show/hide -------------------- */
@@ -229,14 +229,15 @@ function initNdisToggle() {
   if (!ndisSelect) return;
 
   const apply = () => {
-    const val = ndisSelect.value;
+    const val = (ndisSelect.value || "").trim();
     const showYes = val === "Yes";
     const showNo  = val === "No";
 
+    // Importante: usar "block" para sobreescribir el CSS .yes-only/.no-only { display:none }
     document.querySelectorAll(".yes-only")
-      .forEach((el) => (el.style.display = showYes ? "" : "none"));
+      .forEach((el) => (el.style.display = showYes ? "block" : "none"));
     document.querySelectorAll(".no-only")
-      .forEach((el) => (el.style.display = showNo ? "" : "none"));
+      .forEach((el) => (el.style.display = showNo ? "block" : "none"));
   };
 
   ndisSelect.addEventListener("change", apply);
@@ -661,6 +662,49 @@ if (!isReader) {
     }
     throw new Error("Signed URL failed");
   }
+  // ---- Enviar link de reanudación por mail (una sola vez por email) ----
+async function sendResumeEmailOnce(email, token) {
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email).trim())) return;
+  if (!token) return;
+
+  const key = `resumeSent:${email}`;
+  if (localStorage.getItem(key)) return; // dedupe
+
+  // Endpoints conocidos / fallbacks
+  const endpoints = [
+    `${API_BASE}/resume/send`,
+    `${API_BASE}/form/resume-send`,
+    `/api/resume/send`,
+    `/resume/send`,
+  ];
+
+  const payload = { email: String(email).trim(), token };
+
+  for (const url of endpoints) {
+    try {
+      const r1 = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (r1.ok) {
+        localStorage.setItem(key, String(Date.now()));
+        return;
+      }
+    } catch {}
+
+    try {
+      const fd = new FormData();
+      fd.append("email", payload.email);
+      fd.append("token", payload.token);
+      const r2 = await fetch(url, { method: "POST", body: fd });
+      if (r2.ok) {
+        localStorage.setItem(key, String(Date.now()));
+        return;
+      }
+    } catch {}
+  }
+}
 
   async function ensureToken() {
     let token = localStorage.getItem("draftToken");
@@ -778,45 +822,63 @@ if (!isReader) {
   });
 
   // --- Guardar borrador ---
-  window.saveStep = async function saveStep() {
-    if (!validateDraftMin()) return;
+  // --- Guardar borrador ---
+window.saveStep = async function saveStep() {
+  if (!validateDraftMin()) return;
 
-    const formEl = document.getElementById("grantForm");
-    const formData = new FormData(formEl);
+  const formEl = document.getElementById("grantForm");
+  const formData = new FormData(formEl);
 
-    // reemplaza Files por sus S3 keys (una entrada por key)
-    document.querySelectorAll('input[type="file"]').forEach((input) => {
-      if (formData.has(input.name)) formData.delete(input.name);
-      const keys = (input.dataset.s3keys || input.dataset.s3key || "")
-        .split(",").map((s) => s.trim()).filter(Boolean);
-      keys.forEach((k) => formData.append(input.name, k));
+  // reemplaza Files por sus S3 keys (una entrada por key)
+  document.querySelectorAll('input[type="file"]').forEach((input) => {
+    if (formData.has(input.name)) formData.delete(input.name);
+    const keys = (input.dataset.s3keys || input.dataset.s3key || "")
+      .split(",").map((s) => s.trim()).filter(Boolean);
+    keys.forEach((k) => formData.append(input.name, k));
+  });
+
+  formData.append("step", currentStep);
+  const existingToken = localStorage.getItem("draftToken");
+  if (existingToken) formData.append("token", existingToken);
+
+  let tokenForEmail = existingToken || null;
+
+  // 1) intento directo al endpoint principal
+  try {
+    const res = await fetch(`${API_BASE}/form/save-draft`, {
+      method: "POST",
+      body: formData
     });
-
-    formData.append("step", currentStep);
-    const existingToken = localStorage.getItem("draftToken");
-    if (existingToken) formData.append("token", existingToken);
-
-    // 1) intento directo
-    try {
-      const res = await fetch(ENDPOINTS.saveDraft, { method: "POST", body: formData });
-      if (res.ok) {
-        const j = await res.json();
-        if (j.token) localStorage.setItem("draftToken", j.token);
-        showToast("Draft saved.");
-        return;
+    if (res.ok) {
+      const j = await res.json();
+      if (j.token) {
+        localStorage.setItem("draftToken", j.token);
+        tokenForEmail = j.token;
       }
-    } catch {}
-
-    // 2) fallback flexible
+      showToast("Draft saved.");
+    } else {
+      throw new Error(`save-draft ${res.status}`);
+    }
+  } catch {
+    // 2) fallbacks flexibles (JSON/FormData + rutas alternativas)
     try {
       const { json } = await trySaveDraftFlexible(formData);
-      if (json?.token) localStorage.setItem("draftToken", json.token);
+      if (json?.token) {
+        localStorage.setItem("draftToken", json.token);
+        tokenForEmail = json.token;
+      }
       showToast("Draft saved.");
     } catch (err) {
       console.error("save-draft error:", err);
       showToast("Save draft failed.");
+      return;
     }
-  };
+  }
+
+  // ---- Enviar mail una sola vez por email (si hay email válido)
+  const emailVal = (document.querySelector('[name="parent1.email"]')?.value || "").trim();
+  await sendResumeEmailOnce(emailVal, tokenForEmail || localStorage.getItem("draftToken"));
+};
 
   // --- Envío final ---
   document.getElementById("grantForm")?.addEventListener("submit", async (e) => {
