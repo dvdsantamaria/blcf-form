@@ -518,6 +518,40 @@ function flatten(obj, prefix = "", out = {}) {
   }
   return out;
 }
+/* ---------- resume-exchange → hydrate ---------- */
+async function resumeExchangeAndHydrate(rt) {
+  if (!rt) return;
+
+  try {
+    // 1) canjea el rt por un token normal
+    const url = `${API_BASE}/resume/exchange?rt=${encodeURIComponent(rt)}`;
+    const res  = await fetch(url, { credentials: "include" });
+    if (!res.ok) {
+      console.warn("resume exchange failed", res.status);
+      showToast("Could not resume draft.");
+      return;
+    }
+    const j = await res.json().catch(() => ({}));
+    const token = j?.token || j?.draftToken || j?.id;
+    if (!token) {
+      console.warn("exchange response without token", j);
+      showToast("Invalid resume link.");
+      return;
+    }
+
+    // 2) guarda y llama al hidrator clásico
+    localStorage.setItem("draftToken", token);
+    await hydrateFromTokenEdit(token);
+
+    // 3) limpia la URL (sin recargar la página)
+    const clean = new URL(location.href);
+    clean.searchParams.delete("rt");
+    history.replaceState({}, "", clean.toString());
+  } catch (e) {
+    console.error("resume exchange error", e);
+    showToast("Resume link error.");
+  }
+}
 
 /* ---------- Edit-mode: hidratar formulario usando el token ---------- */
 async function hydrateFromTokenEdit(token) {
@@ -1041,7 +1075,7 @@ window.saveStep = async function saveStep() {
     setTimeout(() => location.replace("/"), 500);
   };
 
-  /* -------------------- Initial render -------------------- */
+
 /* -------------------- Initial render -------------------- */
 document.addEventListener("DOMContentLoaded", async () => {
   if (isReader) {
@@ -1053,15 +1087,23 @@ document.addEventListener("DOMContentLoaded", async () => {
     return;
   }
 
-  // Reanudar por token en modo edición (hidratar antes del toggle)
   const params = new URLSearchParams(location.search);
-  const tokenParam = params.get("token");
-  if (tokenParam) {
-    localStorage.setItem("draftToken", tokenParam);
-    await hydrateFromTokenEdit(tokenParam);
+
+  // 1) ¿viene un rt= ?  → canje + hydrate
+  const rt = params.get("rt");
+  if (rt) {
+    await resumeExchangeAndHydrate(rt);
+  } else {
+    // 2) ¿viene un token= ?  → hydrate directo
+    const tokenParam = params.get("token");
+    if (tokenParam) {
+      localStorage.setItem("draftToken", tokenParam);
+      await hydrateFromTokenEdit(tokenParam);
+    }
   }
 
-  initNdisToggle(); // ahora sí, después de hidratar
+  // 3) init UI
+  initNdisToggle();
   showStep(currentStep);
 });
 })();
