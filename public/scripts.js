@@ -232,7 +232,6 @@ function getExistingKeys(input) {
     .map((s) => s.trim())
     .filter(Boolean);
 }
-
 function setKeys(input, keys) {
   const uniq = [...new Set((keys || []).filter(Boolean))].slice(
     0,
@@ -241,6 +240,8 @@ function setKeys(input, keys) {
   const joined = uniq.join(",");
   input.dataset.s3keys = joined;
   input.dataset.s3key = joined; // compat
+  // limpiar selección del input para permitir re-subir mismo nombre luego
+  if (input.value) input.value = "";
   renderExistingFiles(input, uniq);
 }
 
@@ -306,6 +307,62 @@ function renderExistingFiles(input, keys) {
     wrap.append(name, view, removeBtn);
     list.appendChild(wrap);
   });
+}
+
+/* -------------------- File key normalization (resilient) -------------------- */
+function looksLikeS3Key(s) {
+  return typeof s === "string" && s.trim().length > 0 && /[\/]/.test(s);
+}
+
+function normalizeToKeys(val) {
+  // Acepta: string ("a/b.pdf" o "a/b.pdf,c/d.png"), array, objeto { key, keys, 0:"",1:"" }
+  if (!val) return [];
+  if (Array.isArray(val)) {
+    return val.flatMap(normalizeToKeys).filter(looksLikeS3Key);
+  }
+  if (typeof val === "string") {
+    return val
+      .split(",")
+      .map((x) => x.trim())
+      .filter(looksLikeS3Key);
+  }
+  if (typeof val === "object") {
+    if (Array.isArray(val.keys)) return normalizeToKeys(val.keys);
+    if (typeof val.key === "string") return normalizeToKeys(val.key);
+    // objeto tipo {0:"...",1:"..."} o cualquier diccionario
+    return Object.values(val).flatMap(normalizeToKeys).filter(looksLikeS3Key);
+  }
+  return [];
+}
+
+/* -------------------- Collect per-field keys from payload + draft -------------------- */
+function collectFileKeysByField(payload, flattenedData) {
+  const byField = {};
+
+  // 1) Si viene el formato explícito [{field,key}]
+  if (Array.isArray(payload?.fileKeys)) {
+    payload.fileKeys.forEach(({ field, key }) => {
+      if (!field || !key) return;
+      (byField[field] ||= []).push(key);
+    });
+  }
+
+  // 2) También intentar desde el draft "tal cual"
+  document.querySelectorAll('input[type="file"][name]').forEach((input) => {
+    const name = input.name;
+    const val = flattenedData?.[name];
+    const keys = normalizeToKeys(val);
+    if (keys.length) {
+      (byField[name] ||= []).push(...keys);
+    }
+  });
+
+  // 3) limpiar duplicados y respetar el máximo
+  Object.keys(byField).forEach((f) => {
+    byField[f] = [...new Set(byField[f])].slice(0, MAX_FILES_PER_FIELD);
+  });
+
+  return byField;
 }
 
 /* -------------------- NDIS show/hide -------------------- */
