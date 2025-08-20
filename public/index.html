@@ -236,7 +236,7 @@
   <h2>NDIS and Therapy Supports</h2>
 
   <!-- 1) Pregunta inicial -->
-  <label class="form-label">Is your child an NDIS participant or eligible? *</label>
+  <label class="form-label">Is your child an NDIS participant? *</label>
   <select class="form-select" name="ndis.participantEligible" id="ndisEligible">
     <option value="">Select</option>
     <option value="Yes">Yes</option>
@@ -245,7 +245,7 @@
 
   <!-- 2)-NO  →  motivo obligatorio -->
   <div class="no-only mt-2">
-    <label class="form-label">If NO, why not? *</label>
+    <label class="form-label">If no, why not? *</label>
     <textarea class="form-control" rows="2" name="ndis.notEligibleReason"></textarea>
     <label class="form-label mt-2">Child’s therapy goals *</label>
     <textarea class="form-control" rows="3" name="therapy.goals"></textarea>
@@ -253,7 +253,7 @@
 
   <!-- 3)-YES →  plan + goals -->
   <div class="yes-only mt-2">
-    <label class="form-label">Ndis plan or goals *</label>
+    <label class="form-label">NDIS plan or goals *</label>
     <input
       class="form-control"
       type="file"
