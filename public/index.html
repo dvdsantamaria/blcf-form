@@ -100,10 +100,10 @@
           />
           <input
             class="form-control mt-2"
-            placeholder="Receiving Centrelink payments?"
+            placeholder="Are you currently receiving any Centrelink payments?"
             type="text"
             name="parent1.centrelinkPayments"
-          />
+          /> 
           <input
             class="form-control mt-2"
             placeholder="Current living arrangements"
@@ -233,7 +233,7 @@
 
       <!-- ===================== STEP 3 ===================== -->
 <div class="step" id="step3">
-  <h2>NDIS and Therapy</h2>
+  <h2>NDIS and Therapy Supports</h2>
 
   <!-- 1) Pregunta inicial -->
   <label class="form-label">Is your child an NDIS participant or eligible? *</label>
@@ -247,6 +247,8 @@
   <div class="no-only mt-2">
     <label class="form-label">If NO, why not? *</label>
     <textarea class="form-control" rows="2" name="ndis.notEligibleReason"></textarea>
+    <label class="form-label mt-2">Child’s therapy goals *</label>
+    <textarea class="form-control" rows="3" name="therapy.goals"></textarea>
   </div>
 
   <!-- 3)-YES →  plan + goals -->
@@ -260,16 +262,12 @@
       multiple
     />
 
-    <label class="form-label mt-2">Child’s therapy goals *</label>
-    <textarea class="form-control" rows="3" name="therapy.goals"></textarea>
+   
   </div>
 
-  <!-- 4) Therapies & frequency (siempre) -->
-  <label class="form-label mt-3">Therapy/therapies to be funded *</label>
+  <label class="form-label mt-3">What allied health services do you require? *</label>
   <textarea class="form-control" rows="2" name="therapy.toBeFunded"></textarea>
 
-  <label class="form-label mt-2">Therapy frequency or equipment required *</label>
-  <textarea class="form-control" rows="2" name="therapy.frequencyOrEquipment"></textarea>
 
   <!-- 5) Siempre visible al final -->
   <label class="form-label mt-3">Impact if grant is not received *</label>
@@ -353,7 +351,7 @@
           />
           <input
             class="form-control mt-2"
-            placeholder="Receiving Centrelink payments?"
+            placeholder="Are you currently receiving any Centrelink payments?"
             type="text"
             name="parent2.centrelinkPayments"
           />
@@ -386,16 +384,11 @@
           />
           <input
             class="form-control mb-2"
-            placeholder="How many with disability?"
+            placeholder="How many with a disability?"
             type="number"
             name="dependents.withDisabilityCount"
           />
-          <textarea
-            class="form-control mb-2"
-            placeholder="Details of other conditions/disabilities"
-            rows="2"
-            name="otherConditions.details"
-          ></textarea>
+         
         </div>
 
         <!-- ===================== STEP 5 ===================== -->
@@ -428,7 +421,7 @@
                 target="_blank"
                 rel="noopener"
                 onclick="event.stopPropagation()"
-              >privacy policy</a>
+              >Privacy Policy</a>
               and terms
             </label>
           </div>
