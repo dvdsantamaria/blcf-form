@@ -228,6 +228,9 @@ const elFor = (name) => document.querySelector(`[name="${name}"]`);
 
 /* -------------------- File helpers (existing uploads UI) -------------------- */
 const MAX_FILES_PER_FIELD = 5;
+const MAX_FILE_MB = 10;
+const MAX_FILE_BYTES = MAX_FILE_MB * 1024 * 1024;
+
 
 function getExistingKeys(input) {
   return (input.dataset.s3keys || input.dataset.s3key || "")
@@ -1166,6 +1169,12 @@ async function ensureToken() {
       const newKeys = [];
   
       for (const file of files) {
+
+        if (file.size > MAX_FILE_BYTES) {
+               showToast(`Each file must be <= ${MAX_FILE_MB} MB.`);
+               continue; // skip this file, allow smaller ones
+             }
+
         const ext = (file.name.split(".").pop() || "").toLowerCase();
         const mime = file.type || mimeMap[ext] || "";
         if (!mime) {
