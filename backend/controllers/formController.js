@@ -11,6 +11,7 @@ import FormSubmission from "../models/FormSubmission.js";
 import FormDraft from "../models/FormDraft.js";
 import { sendSubmissionMail, sendHtmlEmail } from "../utils/mailer.js";
 import ResumeToken from "../models/ResumeToken.js";
+import { logAudit } from "../utils/logAudit.js";
 import {
   genToken,
   PUBLIC_BASE_URL,
@@ -386,9 +387,20 @@ export const getFileUrl = async (req, res) => {
       { expiresIn: 60 }
     );
     console.log("[S3][presign-get]", { reqId, key, ttl: 60 });
+    await logAudit(req, {
+      action: "presign-get",
+      key,
+      httpStatus: 200,
+    });
     return res.json({ ok: true, url });
   } catch (err) {
     console.error("getFileUrl error:", { reqId, error: err?.message || err });
+    await logAudit(req, {
+      action: "presign-get",
+      key: req.query?.key || null,
+      httpStatus: 500,
+      extra: { error: err?.message || String(err) },
+    });
     return res.status(500).json({ ok: false, error: "Internal Server Error" });
   }
 };
@@ -410,6 +422,12 @@ export const getViewData = async (req, res) => {
       const text = await streamToString(obj.Body);
       console.log("[S3][read]", { reqId, key: finalKey, bytes: text.length });
       const json = JSON.parse(text);
+      await logAudit(req, {
+        action: "view-data",
+        key: finalKey,
+        httpStatus: 200,
+        extra: { type: "submitted" }
+      });
       return res.json({
         ok: true,
         type: "submitted",
@@ -430,6 +448,12 @@ export const getViewData = async (req, res) => {
     const text = await streamToString(obj.Body);
     console.log("[S3][read]", { reqId, key: draftKey, bytes: text.length });
     const json = JSON.parse(text);
+    await logAudit(req, {
+      action: "view-data",
+      key: draftKey,
+      httpStatus: 200,
+      extra: { type: "draft", step: json.step }
+    });
     return res.json({
       ok: true,
       type: "draft",
@@ -441,6 +465,12 @@ export const getViewData = async (req, res) => {
     });
   } catch (err) {
     console.error("getViewData error:", { reqId, error: err?.message || err });
+    await logAudit(req, {
+      action: "view-data",
+      key: req.query?.token ? `submissions/${req.query.token}/(final|draft)` : null,
+      httpStatus: 404,
+      extra: { error: err?.message || String(err) }
+    });
     return res.status(404).json({ ok: false, error: "Not found" });
   }
 };
