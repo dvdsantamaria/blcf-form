@@ -1163,9 +1163,7 @@ function crc32Base64FromArrayBuffer(buf) {
   let bin = "";
   for (let i = 0; i < be.length; i++) bin += String.fromCharCode(be[i]);
   return btoa(bin);
-}
-
-/* --- Upload multi-archivo (hasta 5) --- */
+}/* --- Upload multi-archivo (hasta 5) --- */
 document.querySelectorAll('input[type="file"]').forEach((input) => {
   input.addEventListener("change", async () => {
     let files = Array.from(input.files || []);
@@ -1180,21 +1178,12 @@ document.querySelectorAll('input[type="file"]').forEach((input) => {
     }
     if (files.length > remaining) {
       files = files.slice(0, remaining);
-      showToast(
-        `You can add ${remaining} more file${remaining > 1 ? "s" : ""} (max ${MAX_FILES_PER_FIELD} total).`
-      );
+      showToast(`You can add ${remaining} more file${remaining > 1 ? "s" : ""} (max ${MAX_FILES_PER_FIELD} total).`);
     }
 
     const fieldName = input.name;
-    const mimeMap = {
-      pdf: "application/pdf",
-      jpg: "image/jpeg",
-      jpeg: "image/jpeg",
-      png: "image/png",
-      webp: "image/webp",
-      heic: "image/heic",
-      heif: "image/heic",
-    };
+    const mimeMap = { pdf:"application/pdf", jpg:"image/jpeg", jpeg:"image/jpeg",
+                      png:"image/png", webp:"image/webp", heic:"image/heic", heif:"image/heic" };
     const newKeys = [];
 
     for (const file of files) {
@@ -1205,38 +1194,31 @@ document.querySelectorAll('input[type="file"]').forEach((input) => {
 
       const ext = (file.name.split(".").pop() || "").toLowerCase();
       const mime = file.type || mimeMap[ext] || "";
-      if (!mime) {
-        showToast("Unsupported file type.");
-        input.value = "";
-        return;
-      }
+      if (!mime) { showToast("Unsupported file type."); input.value = ""; return; }
 
       try {
         const token = await ensureToken();
 
+        // -- conseguir URL pre-firmada --
         let presign;
         try {
           const r = await fetch(
-            `${API_BASE}/form/generate-upload-url?field=${encodeURIComponent(
-              fieldName
-            )}&token=${encodeURIComponent(token)}&type=${encodeURIComponent(
-              mime
-            )}`,
+            `${API_BASE}/form/generate-upload-url?field=${encodeURIComponent(fieldName)}&token=${encodeURIComponent(token)}&type=${encodeURIComponent(mime)}`,
             { headers: { Accept: "application/json" } }
           );
           if (r.ok) presign = await r.json();
         } catch {}
-
-        // 2) fall back if needed
         if (!presign || !presign.url || !presign.key) {
           presign = await getSignedUrlFlexible(fieldName, token, mime);
         }
 
+        // -- PUT a S3 con los mismos headers firmados --
         const up = await fetch(presign.url, {
           method: "PUT",
           headers: { "Content-Type": mime },
           body: file
         });
+
         if (!up.ok) {
           console.error("S3 upload failed", up.status, await up.text().catch(() => ""));
           throw new Error("Upload failed");
@@ -1254,7 +1236,7 @@ document.querySelectorAll('input[type="file"]').forEach((input) => {
       setKeys(input, [...existing, ...newKeys]);
       showToast("Files uploaded.");
     }
-    input.value = ""; // reset input
+    input.value = "";
   });
 });
 

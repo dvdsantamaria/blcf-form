@@ -324,7 +324,6 @@ export const handleFormSubmission = async (req, res) => {
       .json({ ok: false, error: "Internal Server Error" });
   }
 };
-
 // ───────────────── PRESIGNED URL (PUT) ─────────────────
 export const generateUploadUrl = async (req, res) => {
   const reqId = req.requestId || "-";
@@ -334,39 +333,45 @@ export const generateUploadUrl = async (req, res) => {
       return res.status(400).json({ ok: false, error: "Missing parameters" });
     }
 
-    // build key
+    // --- construir key ---
     const extFromFilename = filename ? filename.split(".").pop() : null;
     const extFromType = type && type.includes("/") ? type.split("/")[1] : null;
     const ext = (extFromFilename || extFromType || "bin")
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, "");
+      .toLowerCase().replace(/[^a-z0-9]/g, "");
 
     const safeField = (field || "file")
-      .toLowerCase()
-      .replace(/[^a-z0-9_.-]/g, "_");
+      .toLowerCase().replace(/[^a-z0-9_.-]/g, "_");
 
     const iso = new Date().toISOString().replace(/[-:.TZ]/g, "");
     const key = `submissions/${token}/uploads/${iso}_${safeField}.${ext}`;
 
     console.log("[S3][presign-put]", { reqId, token, key, contentType: type });
 
-    // 👉 no kmsParams here – bucket default encryption handles SSE-KMS
+    // 👉  volvemos a incluir kmsParams  👈
     const url = await getSignedUrl(
       s3,
       new PutObjectCommand({
         Bucket: BUCKET,
         Key: key,
-        ContentType: type
+        ContentType: type,
+        ...kmsParams            // ← firma los encabezados SSE-KMS
       }),
       { expiresIn: 3600 }
     );
 
-    return res.status(200).json({ ok: true, url, key });
+    // devolvemos los encabezados que el front-end DEBE reenviar
+    const sseHeaders = {
+      "x-amz-server-side-encryption": "aws:kms",
+      "x-amz-server-side-encryption-aws-kms-key-id": process.env.AWS_KMS_KEY_ID
+    };
+
+    return res.json({ ok: true, url, key, sse: sseHeaders });
   } catch (err) {
     console.error("generateUploadUrl error:", { reqId, error: err?.message || err });
     return res.status(500).json({ ok: false, error: "Internal Server Error" });
   }
 };
+
 
 // ───────────────── PRESIGNED URL (GET) ─────────────────
 export const getFileUrl = async (req, res) => {
