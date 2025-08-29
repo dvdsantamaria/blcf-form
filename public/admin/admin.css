@@ -10,8 +10,8 @@ header {
   align-items: center;
   justify-content: space-between;
   padding: 12px 16px;
-  background: #0b5ed7;
-  color: #fff;
+  background: #4dd8d0;  /* antes: #0b5ed7 */
+  color: #073b37;       /* antes: #fff */
 }
 
 main {

@@ -94,24 +94,63 @@ function showUserEmail(token) {
 }
 
 // === Tabla de envíos ===
+function formatAuDate(s) {
+  const d = s ? new Date(s) : null;
+  if (!d || isNaN(d)) return "-";
+  return d.toLocaleString("en-AU", {
+    timeZone: "Australia/Sydney",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) =>
+    ({ "&":"&nbsp;".replace("nbsp;","amp;"), "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])
+  );
+}
+
+
 function loadList(items) {
   const tbody = document.getElementById("tbody");
   if (!tbody) return;
   tbody.innerHTML = "";
 
+  // helpers locales para escapar y formatear fecha AU
+  const esc = (s) =>
+    String(s ?? "").replace(/[&<>"']/g, (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])
+    );
+
+  const formatAuDate = (s) => {
+    const d = s ? new Date(s) : null;
+    if (!d || isNaN(d)) return "-";
+    return d.toLocaleString("en-AU", {
+      timeZone: "Australia/Sydney",
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
   (items || []).forEach((row) => {
+    const name =
+      `${esc(row.childFirst)} ${esc(row.childLast)}`.trim() || "-";
+    const when = formatAuDate(
+      row.submittedAt || row.createdAt || row.lastActivityAt
+    );
+
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td>${row.submissionId}</td>
-      <td>${row.createdAt || "-"}</td>
-      <td>${row.token || "-"}</td>
+      <td>${name}</td>
+      <td>${when}</td>
       <td>
-        <button class="btn btn-sm btn-outline-primary btn-open" data-token="${
-          row.submissionId
-        }">Open</button>
-        <button class="btn btn-sm btn-outline-secondary btn-manifest" data-token="${
-          row.submissionId
-        }">Manifest</button>
+        <button class="btn btn-sm btn-outline-primary btn-open" data-token="${row.submissionId}">Open</button>
       </td>
     `;
     tbody.appendChild(tr);
@@ -124,10 +163,6 @@ function loadList(items) {
       )}`;
       window.open(url, "_blank", "noopener");
     });
-  });
-
-  tbody.querySelectorAll("button.btn-manifest").forEach((btn) => {
-    btn.addEventListener("click", () => showDetail(btn.dataset.token));
   });
 }
 

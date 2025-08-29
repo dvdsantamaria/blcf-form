@@ -21,6 +21,14 @@ const s3 = new S3Client({
 });
 
 /* ──────────────── Helpers ──────────────── */
+
+async function streamToString(stream) {
+  const chunks = [];
+  for await (const chunk of stream) chunks.push(chunk);
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+
 async function listPrefix(Prefix, MaxKeys = 1_000, reqId) {
   if (!S3_BUCKET) return [];
 
@@ -78,11 +86,50 @@ export async function listSubmissions(req, res) {
     return res.status(403).json({ ok: false, error: "Forbidden" });
   }
 
+  // helper local para leer streams S3
+  const streamToString = async (stream) => {
+    const chunks = [];
+    for await (const chunk of stream) chunks.push(chunk);
+    return Buffer.concat(chunks).toString("utf8");
+  };
+
   try {
-    const items = await FormSubmission.find({}, { _id: 0, __v: 0 })
+    const baseItems = await FormSubmission.find({}, { _id: 0, __v: 0 })
       .sort({ createdAt: -1 })
       .limit(500)
       .lean();
+
+    // Enriquecer con childFirst/childLast/submittedAt desde el JSON final en S3
+    const items = await Promise.all(
+      (baseItems || []).map(async (sub) => {
+        let childFirst = "";
+        let childLast = "";
+        let submittedAt = null;
+
+        try {
+          const key = sub?.s3Key;
+          if (key) {
+            const obj = await s3.send(
+              new GetObjectCommand({ Bucket: S3_BUCKET, Key: key })
+            );
+            const txt = await streamToString(obj.Body);
+            const json = JSON.parse(txt);
+            childFirst = json?.data?.child?.firstName || "";
+            childLast = json?.data?.child?.lastName || "";
+            submittedAt = json?.submittedAt || null;
+          }
+        } catch (e) {
+          console.warn("[admin][listSubmissions][parse]", {
+            reqId,
+            key: sub?.s3Key,
+            error: e?.message || e,
+          });
+        }
+
+        return { ...sub, childFirst, childLast, submittedAt };
+      })
+    );
+
     console.log("[admin][listSubmissions]", { reqId, count: items.length });
     res.json({ ok: true, items });
   } catch (err) {
