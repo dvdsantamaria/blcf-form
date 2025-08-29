@@ -180,6 +180,7 @@ export const handleFormSubmission = async (req, res) => {
     const now = new Date();
     const timestamp = now.toISOString();
 
+    // keep token rules
     const token =
       body.token && /^[A-Za-z0-9._~-]{10,}$/.test(body.token)
         ? body.token
@@ -194,12 +195,16 @@ export const handleFormSubmission = async (req, res) => {
     const fileKeys = extractFileKeysFromBody(body);
     const { childFirst, childLast } = pickChildNameFromBody(body);
 
+    // compute finalKey first so we can satisfy schema validation (s3Key required)
+    const finalKey = `submissions/${token}/final/submission.json`;
+
     // Create or load submission to get submissionNumber from pre-save hook
     let submission = await FormSubmission.findOne({ submissionId: token });
 
     if (!submission) {
       submission = new FormSubmission({
         submissionId: token,
+        s3Key: finalKey,                 // required by schema
         status: "submitted",
         fileKeys,
         ...(patientEmail ? { email: patientEmail } : {}),
@@ -208,8 +213,10 @@ export const handleFormSubmission = async (req, res) => {
         lastActivityAt: now,
         createdAt: now,
       });
-      await submission.save(); // generates submissionNumber in pre-save
+      await submission.save(); // pre-save generates submissionNumber
     } else {
+      // update existing and ensure s3Key points to final JSON
+      submission.s3Key = finalKey;
       submission.status = "submitted";
       submission.fileKeys = fileKeys;
       if (patientEmail) submission.email = patientEmail;
@@ -221,8 +228,7 @@ export const handleFormSubmission = async (req, res) => {
 
     const submissionNumber = submission.submissionNumber;
 
-    // Build final S3 object including submissionNumber
-    const finalKey = `submissions/${token}/final/submission.json`;
+    // build final payload and upload to S3
     const payload = {
       token,
       submissionNumber,
@@ -241,11 +247,7 @@ export const handleFormSubmission = async (req, res) => {
 
     await putJsonToS3(finalKey, payload, reqId);
 
-    // Update s3Key after upload
-    submission.s3Key = finalKey;
-    await submission.save();
-
-    // Mark draft as finalized
+    // mark draft as finalized
     await FormDraft.findOneAndUpdate(
       { token },
       {
@@ -261,7 +263,7 @@ export const handleFormSubmission = async (req, res) => {
       { upsert: true }
     );
 
-    // Admin recipients
+    // admin recipients
     const notifyRaw = [
       process.env.SUBMISSION_NOTIFY_TO || "",
       process.env.ADMIN_NOTIFY_TO || "",
@@ -293,12 +295,10 @@ export const handleFormSubmission = async (req, res) => {
         ids: results.map((r) => r?.id).filter(Boolean),
       });
     } else {
-      console.warn("[submit][notify] no recipients configured; skipping email", {
-        reqId,
-      });
+      console.warn("[submit][notify] no recipients configured; skipping email", { reqId });
     }
 
-    // Applicant email (if present)
+    // applicant email
     if (patientEmail) {
       await sendSubmissionMail({
         to: patientEmail,
@@ -309,10 +309,9 @@ export const handleFormSubmission = async (req, res) => {
     }
 
     console.log("✅ Submission saved:", token, submissionNumber, "(reqId:", reqId + ")");
-    return res
-      .status(200)
-      .json({ ok: true, token, submissionNumber, s3Key: finalKey });
+    return res.status(200).json({ ok: true, token, submissionNumber, s3Key: finalKey });
   } catch (err) {
+    // likely cause when you saw 500: ValidationError: FormSubmission validation failed: s3Key: Path 's3Key' is required.
     console.error("❌ submit error:", { reqId, error: err?.message || err });
     return res.status(500).json({ ok: false, error: "Internal Server Error" });
   }
