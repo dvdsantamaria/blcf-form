@@ -1164,6 +1164,7 @@ function crc32Base64FromArrayBuffer(buf) {
   for (let i = 0; i < be.length; i++) bin += String.fromCharCode(be[i]);
   return btoa(bin);
 }
+
 /* --- Upload multi-archivo (hasta 5) --- */
 document.querySelectorAll('input[type="file"]').forEach((input) => {
   input.addEventListener("change", async () => {
@@ -1199,7 +1200,7 @@ document.querySelectorAll('input[type="file"]').forEach((input) => {
     for (const file of files) {
       if (file.size > MAX_FILE_BYTES) {
         showToast(`Each file must be <= ${MAX_FILE_MB} MB.`);
-        continue; // skip this file, allow smaller ones
+        continue;
       }
 
       const ext = (file.name.split(".").pop() || "").toLowerCase();
@@ -1213,7 +1214,7 @@ document.querySelectorAll('input[type="file"]').forEach((input) => {
       try {
         const token = await ensureToken();
 
-        // intento consistente primero
+        // 1) try canonical endpoint
         let presign;
         try {
           const r = await fetch(
@@ -1227,20 +1228,16 @@ document.querySelectorAll('input[type="file"]').forEach((input) => {
           if (r.ok) presign = await r.json();
         } catch {}
 
-        // si falla, uso flexible
+        // 2) fall back if needed
         if (!presign || !presign.url || !presign.key) {
           presign = await getSignedUrlFlexible(fieldName, token, mime);
         }
 
-        // Upload directo – sin checksum ni headers adicionales
         const up = await fetch(presign.url, {
           method: "PUT",
-          headers: {
-            "Content-Type": mime
-          },
+          headers: { "Content-Type": mime },
           body: file
         });
-
         if (!up.ok) {
           console.error("S3 upload failed", up.status, await up.text().catch(() => ""));
           throw new Error("Upload failed");
@@ -1255,13 +1252,10 @@ document.querySelectorAll('input[type="file"]').forEach((input) => {
     }
 
     if (newKeys.length) {
-      const merged = [...existing, ...newKeys];
-      setKeys(input, merged); // persiste dataset + render
+      setKeys(input, [...existing, ...newKeys]);
       showToast("Files uploaded.");
     }
-
-    // limpiar selección del input (permite re-subir mismo nombre)
-    input.value = "";
+    input.value = ""; // reset input
   });
 });
 

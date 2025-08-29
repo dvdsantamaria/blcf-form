@@ -325,7 +325,7 @@ export const handleFormSubmission = async (req, res) => {
   }
 };
 
-// ───────────────── PRESIGNED URL ─────────────────
+// ───────────────── PRESIGNED URL (PUT) ─────────────────
 export const generateUploadUrl = async (req, res) => {
   const reqId = req.requestId || "-";
   try {
@@ -334,6 +334,7 @@ export const generateUploadUrl = async (req, res) => {
       return res.status(400).json({ ok: false, error: "Missing parameters" });
     }
 
+    // build key
     const extFromFilename = filename ? filename.split(".").pop() : null;
     const extFromType = type && type.includes("/") ? type.split("/")[1] : null;
     const ext = (extFromFilename || extFromType || "bin")
@@ -343,44 +344,26 @@ export const generateUploadUrl = async (req, res) => {
     const safeField = (field || "file")
       .toLowerCase()
       .replace(/[^a-z0-9_.-]/g, "_");
+
     const iso = new Date().toISOString().replace(/[-:.TZ]/g, "");
     const key = `submissions/${token}/uploads/${iso}_${safeField}.${ext}`;
 
-    console.log("[S3][presign-put]", {
-      reqId,
-      token,
-      key,
-      contentType: type,
-    });
+    console.log("[S3][presign-put]", { reqId, token, key, contentType: type });
 
+    // 👉 no kmsParams here – bucket default encryption handles SSE-KMS
     const url = await getSignedUrl(
       s3,
       new PutObjectCommand({
         Bucket: BUCKET,
         Key: key,
-        ContentType: type,
-        ChecksumAlgorithm: undefined, 
-        ...kmsParams,
+        ContentType: type
       }),
       { expiresIn: 3600 }
     );
 
-    // headers SSE-KMS que el cliente debe enviar en el PUT
-    const sse =
-      process.env.AWS_KMS_KEY_ID
-        ? {
-            "x-amz-server-side-encryption": "aws:kms",
-            "x-amz-server-side-encryption-aws-kms-key-id":
-              process.env.AWS_KMS_KEY_ID,
-          }
-        : undefined;
-
-    return res.status(200).json({ ok: true, url, key, sse });
+    return res.status(200).json({ ok: true, url, key });
   } catch (err) {
-    console.error("generateUploadUrl error:", {
-      reqId,
-      error: err?.message || err,
-    });
+    console.error("generateUploadUrl error:", { reqId, error: err?.message || err });
     return res.status(500).json({ ok: false, error: "Internal Server Error" });
   }
 };
