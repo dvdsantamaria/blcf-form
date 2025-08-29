@@ -88,8 +88,7 @@ function showUserEmail(token) {
     const [, payload] = token.split(".");
     const { sub: email } = JSON.parse(atob(payload));
     greet.textContent = `Logged in as: ${email}`;
-    greet.style.cssText =
-      "text-align:right; margin:8px 24px 0 0; color:#0b5ed7; font-weight:500;";
+    greet.style.cssText = "text-align:right; margin:8px 24px 0 0; font-weight:500; color:#000;";
   } catch (e) {}
 }
 

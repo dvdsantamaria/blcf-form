@@ -98,3 +98,5 @@ pre {
   color: #555;
   font-size: 0.9rem;
 }
+
+.user-greeting { color: #000 !important; }

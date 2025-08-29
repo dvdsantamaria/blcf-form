@@ -22,13 +22,42 @@ const s3 = new S3Client({
 
 /* ──────────────── Helpers ──────────────── */
 
+// Read Node stream to string
 async function streamToString(stream) {
   const chunks = [];
   for await (const chunk of stream) chunks.push(chunk);
   return Buffer.concat(chunks).toString("utf8");
 }
 
+// Tolerant child name extractor for various payload shapes
+function pickChildNameFromJson(json) {
+  const d = json?.data || {};
+  const first =
+    d?.child?.firstName ||
+    d?.childFirstName ||
+    d?.child_first_name ||
+    d?.childFirst ||
+    d?.child_first ||
+    "";
+  const last =
+    d?.child?.lastName ||
+    d?.childLastName ||
+    d?.child_last_name ||
+    d?.childLast ||
+    d?.child_last ||
+    "";
+  const full = d?.child?.name || d?.childName || "";
+  let f = String(first || "").trim();
+  let l = String(last || "").trim();
+  if (!f && !l && full) {
+    const parts = String(full).trim().split(/\s+/);
+    f = parts.shift() || "";
+    l = parts.join(" ");
+  }
+  return { f, l };
+}
 
+// List all S3 objects under a prefix
 async function listPrefix(Prefix, MaxKeys = 1_000, reqId) {
   if (!S3_BUCKET) return [];
 
@@ -78,45 +107,43 @@ export async function listSubmissions(req, res) {
   const reqId = req.requestId || "-";
   const adminEmail = req.adminEmail;
   const allowed = (process.env.ADMIN_ALLOWED_EMAILS || "")
-    .split(/[,;]\s*/)
+    .split(/[,;\s]+/)
     .map((s) => s.trim())
     .filter(Boolean);
+
   if (!adminEmail || !allowed.includes(adminEmail)) {
     console.warn("[admin][listSubmissions][forbidden]", { reqId, adminEmail });
     return res.status(403).json({ ok: false, error: "Forbidden" });
   }
 
-  // helper local para leer streams S3
-  const streamToString = async (stream) => {
-    const chunks = [];
-    for await (const chunk of stream) chunks.push(chunk);
-    return Buffer.concat(chunks).toString("utf8");
-  };
-
   try {
     const baseItems = await FormSubmission.find({}, { _id: 0, __v: 0 })
-      .sort({ createdAt: -1 })
+      .sort({ lastActivityAt: -1, createdAt: -1 })
       .limit(500)
       .lean();
 
-    // Enriquecer con childFirst/childLast/submittedAt desde el JSON final en S3
+    // Enrich with childFirst childLast and submittedAt
     const items = await Promise.all(
       (baseItems || []).map(async (sub) => {
-        let childFirst = "";
-        let childLast = "";
-        let submittedAt = null;
+        let childFirst = sub.childFirst || "";
+        let childLast = sub.childLast || "";
+        let submittedAt = sub.submittedAt || null;
 
         try {
           const key = sub?.s3Key;
-          if (key) {
+          if (key && (!childFirst || !childLast || !submittedAt)) {
             const obj = await s3.send(
               new GetObjectCommand({ Bucket: S3_BUCKET, Key: key })
             );
             const txt = await streamToString(obj.Body);
             const json = JSON.parse(txt);
-            childFirst = json?.data?.child?.firstName || "";
-            childLast = json?.data?.child?.lastName || "";
-            submittedAt = json?.submittedAt || null;
+
+            if (!childFirst || !childLast) {
+              const picked = pickChildNameFromJson(json);
+              childFirst = childFirst || picked.f || "";
+              childLast = childLast || picked.l || "";
+            }
+            submittedAt = submittedAt || json?.submittedAt || null;
           }
         } catch (e) {
           console.warn("[admin][listSubmissions][parse]", {
@@ -146,9 +173,10 @@ export async function getManifest(req, res) {
   const reqId = req.requestId || "-";
   const adminEmail = req.adminEmail;
   const allowed = (process.env.ADMIN_ALLOWED_EMAILS || "")
-    .split(/[,;]\s*/)
+    .split(/[,;\s]+/)
     .map((s) => s.trim())
     .filter(Boolean);
+
   if (!adminEmail || !allowed.includes(adminEmail)) {
     console.warn("[admin][getManifest][forbidden]", { reqId, adminEmail });
     return res.status(403).json({ ok: false, error: "Forbidden" });
@@ -171,6 +199,8 @@ export async function getManifest(req, res) {
       token,
       status: sub?.status || draftMeta?.status || "unknown",
       email: sub?.email || draftMeta?.email || null,
+      childFirst: sub?.childFirst || draftMeta?.childFirst || null,
+      childLast: sub?.childLast || draftMeta?.childLast || null,
       lastActivityAt: sub?.lastActivityAt || draftMeta?.lastActivityAt || null,
       uploads,
       drafts,
@@ -196,9 +226,10 @@ export async function adminFileUrl(req, res) {
   const reqId = req.requestId || "-";
   const adminEmail = req.adminEmail;
   const allowed = (process.env.ADMIN_ALLOWED_EMAILS || "")
-    .split(/[,;]\s*/)
+    .split(/[,;\s]+/)
     .map((s) => s.trim())
     .filter(Boolean);
+
   if (!adminEmail || !allowed.includes(adminEmail)) {
     console.warn("[admin][file-url][forbidden]", { reqId, adminEmail });
     return res.status(403).json({ ok: false, error: "Forbidden" });

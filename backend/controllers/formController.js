@@ -36,6 +36,34 @@ function getField(body, dottedPath) {
   }, body);
 }
 
+// Extract child name from different shapes
+function pickChildNameFromBody(d) {
+  const data = d || {};
+  const first =
+    data?.child?.firstName ||
+    data?.childFirstName ||
+    data?.child_first_name ||
+    data?.childFirst ||
+    data?.child_first ||
+    "";
+  const last =
+    data?.child?.lastName ||
+    data?.childLastName ||
+    data?.child_last_name ||
+    data?.childLast ||
+    data?.child_last ||
+    "";
+  const full = data?.child?.name || data?.childName || "";
+  let f = String(first || "").trim();
+  let l = String(last || "").trim();
+  if (!f && !l && full) {
+    const parts = String(full).trim().split(/\s+/);
+    f = parts.shift() || "";
+    l = parts.join(" ");
+  }
+  return { childFirst: f, childLast: l };
+}
+
 // Extract file keys from payload (accept arrays or scalars)
 function extractFileKeysFromBody(body) {
   const keys = [];
@@ -100,6 +128,7 @@ export const saveDraft = async (req, res) => {
     const historyKey = `submissions/${token}/drafts/${isoName}.json`;
 
     const fileKeys = extractFileKeysFromBody(body);
+    const { childFirst, childLast } = pickChildNameFromBody(body);
 
     const draftPayload = {
       token,
@@ -126,6 +155,8 @@ export const saveDraft = async (req, res) => {
           updatedAt: now,
           lastActivityAt: now,
           ...(email ? { email } : {}),
+          ...(childFirst ? { childFirst } : {}),
+          ...(childLast ? { childLast } : {}),
         },
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
@@ -160,6 +191,7 @@ export const handleFormSubmission = async (req, res) => {
 
     const finalKey = `submissions/${token}/final/submission.json`;
     const fileKeys = extractFileKeysFromBody(body);
+    const { childFirst, childLast } = pickChildNameFromBody(body);
 
     const payload = {
       token,
@@ -180,6 +212,8 @@ export const handleFormSubmission = async (req, res) => {
           status: "submitted",
           fileKeys,
           ...(patientEmail ? { email: patientEmail } : {}),
+          ...(childFirst ? { childFirst } : {}),
+          ...(childLast ? { childLast } : {}),
           lastActivityAt: now,
         },
       },
@@ -194,6 +228,8 @@ export const handleFormSubmission = async (req, res) => {
           status: "finalized",
           lastActivityAt: now,
           ...(patientEmail ? { email: patientEmail } : {}),
+          ...(childFirst ? { childFirst } : {}),
+          ...(childLast ? { childLast } : {}),
         },
       },
       { upsert: true }
@@ -214,7 +250,7 @@ export const handleFormSubmission = async (req, res) => {
 
     console.log("[submit][notify]", { reqId, notifyRaw, recipients });
 
-    if (receptors.length) {
+    if (recipients.length) {
       const emailTasks = recipients.map((to) =>
         sendSubmissionMail({ to, token, role: "admin", requestId: reqId })
       );
