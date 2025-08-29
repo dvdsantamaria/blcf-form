@@ -118,12 +118,13 @@ function loadList(items) {
   if (!tbody) return;
   tbody.innerHTML = "";
 
-  // helpers locales para escapar y formatear fecha AU
+  // escape HTML
   const esc = (s) =>
     String(s ?? "").replace(/[&<>"']/g, (c) =>
       ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])
     );
 
+  // AU date format in Sydney TZ
   const formatAuDate = (s) => {
     const d = s ? new Date(s) : null;
     if (!d || isNaN(d)) return "-";
@@ -137,24 +138,37 @@ function loadList(items) {
     });
   };
 
+  // Safe fallback for legacy rows without submissionNumber
+  const makeFallbackRef = (row) => {
+    const when =
+      (row && (row.submittedAt || row.createdAt || row.lastActivityAt)) || Date.now();
+    const d = new Date(when);
+    if (isNaN(d)) return null;
+    const yyyymm = `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+    const suffix = String(row?.submissionId || "").slice(-8).toUpperCase();
+    return suffix ? `BL-${yyyymm}-${suffix}` : null;
+  };
+
   (items || []).forEach((row) => {
-    const name =
-      `${esc(row.childFirst)} ${esc(row.childLast)}`.trim() || "-";
-    const when = formatAuDate(
-      row.submittedAt || row.createdAt || row.lastActivityAt
-    );
+    const ref = esc(row.submissionNumber || makeFallbackRef(row) || "-");
+    const name = `${esc(row.childFirst)} ${esc(row.childLast)}`.trim() || "-";
+    const when = formatAuDate(row.submittedAt || row.createdAt || row.lastActivityAt);
 
     const tr = document.createElement("tr");
     tr.innerHTML = `
+      <td><code>${ref}</code></td>
       <td>${name}</td>
       <td>${when}</td>
       <td>
-        <button class="btn btn-sm btn-outline-primary btn-open" data-token="${row.submissionId}">Open</button>
+        <button class="btn btn-sm btn-outline-primary btn-open" data-token="${esc(
+          row.submissionId
+        )}">Open</button>
       </td>
     `;
     tbody.appendChild(tr);
   });
 
+  // open reader in new tab with token
   tbody.querySelectorAll("button.btn-open").forEach((btn) => {
     btn.addEventListener("click", () => {
       const url = `${location.origin}/?mode=reader&token=${encodeURIComponent(

@@ -22,6 +22,14 @@ const s3 = new S3Client({
 
 /* ──────────────── Helpers ──────────────── */
 
+function makeFallbackRef(sub) {
+  const when = new Date(sub.createdAt || Date.now());
+  if (Number.isNaN(when.getTime())) return null;
+  const yyyymm = `${when.getUTCFullYear()}${String(when.getUTCMonth() + 1).padStart(2, "0")}`;
+  const suffix = String(sub.submissionId || "").slice(-8).toUpperCase();
+  return suffix ? `BL-${yyyymm}-${suffix}` : null;
+}
+
 // Read Node stream to string
 async function streamToString(stream) {
   const chunks = [];
@@ -112,6 +120,8 @@ async function listPrefix(Prefix, MaxKeys = 1_000, reqId) {
   return out;
 }
 
+
+
 /* ──────────────── Controllers ──────────────── */
 
 // GET /api/admin/submissions
@@ -128,22 +138,34 @@ export async function listSubmissions(req, res) {
     return res.status(403).json({ ok: false, error: "Forbidden" });
   }
 
+  // Local fallback (no access power)
+  const makeFallbackRef = (sub) => {
+    const when = new Date(sub.createdAt || Date.now());
+    if (Number.isNaN(when.getTime())) return null;
+    const yyyymm = `${when.getUTCFullYear()}${String(
+      when.getUTCMonth() + 1
+    ).padStart(2, "0")}`;
+    const suffix = String(sub?.submissionId || "").slice(-8).toUpperCase();
+    return suffix ? `BL-${yyyymm}-${suffix}` : null;
+  };
+
   try {
     const baseItems = await FormSubmission.find({}, { _id: 0, __v: 0 })
       .sort({ lastActivityAt: -1, createdAt: -1 })
       .limit(500)
       .lean();
 
-    // Enrich with childFirst childLast and submittedAt
+    // Enrich with names, submittedAt, submissionNumber
     const items = await Promise.all(
       (baseItems || []).map(async (sub) => {
         let childFirst = sub.childFirst || "";
         let childLast = sub.childLast || "";
         let submittedAt = sub.submittedAt || null;
+        let submissionNumber = sub.submissionNumber || null;
 
         try {
           const key = sub?.s3Key;
-          if (key && (!childFirst || !childLast || !submittedAt)) {
+          if (key && (!childFirst || !childLast || !submittedAt || !submissionNumber)) {
             const obj = await s3.send(
               new GetObjectCommand({ Bucket: S3_BUCKET, Key: key })
             );
@@ -156,6 +178,7 @@ export async function listSubmissions(req, res) {
               childLast = childLast || picked.l || "";
             }
             submittedAt = submittedAt || json?.submittedAt || null;
+            submissionNumber = submissionNumber || json?.submissionNumber || null;
           }
         } catch (e) {
           console.warn("[admin][listSubmissions][parse]", {
@@ -165,7 +188,10 @@ export async function listSubmissions(req, res) {
           });
         }
 
-        return { ...sub, childFirst, childLast, submittedAt };
+        // Final safety fallback
+        if (!submissionNumber) submissionNumber = makeFallbackRef(sub);
+
+        return { ...sub, childFirst, childLast, submittedAt, submissionNumber };
       })
     );
 
@@ -194,6 +220,18 @@ export async function getManifest(req, res) {
     return res.status(403).json({ ok: false, error: "Forbidden" });
   }
 
+  // Local fallback (no access power)
+  const makeFallbackRef = (sub) => {
+    if (!sub) return null;
+    const when = new Date(sub.createdAt || Date.now());
+    if (Number.isNaN(when.getTime())) return null;
+    const yyyymm = `${when.getUTCFullYear()}${String(
+      when.getUTCMonth() + 1
+    ).padStart(2, "0")}`;
+    const suffix = String(sub?.submissionId || "").slice(-8).toUpperCase();
+    return suffix ? `BL-${yyyymm}-${suffix}` : null;
+  };
+
   try {
     const { token } = req.params;
     if (!token)
@@ -207,12 +245,36 @@ export async function getManifest(req, res) {
       FormDraft.findOne({ token }).lean(),
     ]);
 
+    // Prefer Mongo value, else try parse final JSON, else fallback
+    let submissionNumber = sub?.submissionNumber || null;
+    if (!submissionNumber && finals && finals[0]) {
+      try {
+        const finalKey =
+          finals[0]?.Key || finals[0]?.key || finals[0]; // depends on listPrefix shape
+        if (finalKey) {
+          const obj = await s3.send(
+            new GetObjectCommand({ Bucket: S3_BUCKET, Key: finalKey })
+          );
+          const txt = await streamToString(obj.Body);
+          const json = JSON.parse(txt);
+          submissionNumber = json?.submissionNumber || null;
+        }
+      } catch (e) {
+        console.warn("[admin][getManifest][final-parse]", {
+          reqId,
+          error: e?.message || e,
+        });
+      }
+    }
+    if (!submissionNumber) submissionNumber = makeFallbackRef(sub);
+
     const manifest = {
       token,
       status: sub?.status || draftMeta?.status || "unknown",
       email: sub?.email || draftMeta?.email || null,
       childFirst: sub?.childFirst || draftMeta?.childFirst || null,
       childLast: sub?.childLast || draftMeta?.childLast || null,
+      submissionNumber, // new
       lastActivityAt: sub?.lastActivityAt || draftMeta?.lastActivityAt || null,
       uploads,
       drafts,
