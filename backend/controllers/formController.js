@@ -359,6 +359,7 @@ export const generateUploadUrl = async (req, res) => {
         Bucket: BUCKET,
         Key: key,
         ContentType: type,
+        ChecksumAlgorithm: undefined, 
         ...kmsParams,
       }),
       { expiresIn: 3600 }
