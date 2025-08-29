@@ -32,21 +32,33 @@ async function streamToString(stream) {
 // Tolerant child name extractor for various payload shapes
 function pickChildNameFromJson(json) {
   const d = json?.data || {};
+
   const first =
     d?.child?.firstName ||
     d?.childFirstName ||
     d?.child_first_name ||
     d?.childFirst ||
     d?.child_first ||
+    d["child.firstName"] ||   // <-- agregado
+    d["child.first_name"] ||  // <-- agregado
     "";
+
   const last =
     d?.child?.lastName ||
     d?.childLastName ||
     d?.child_last_name ||
     d?.childLast ||
     d?.child_last ||
+    d["child.lastName"] ||    // <-- agregado
+    d["child.last_name"] ||   // <-- agregado
     "";
-  const full = d?.child?.name || d?.childName || "";
+
+  const full =
+    d?.child?.name ||
+    d?.childName ||
+    d["child.name"] ||        // <-- agregado
+    "";
+
   let f = String(first || "").trim();
   let l = String(last || "").trim();
   if (!f && !l && full) {
