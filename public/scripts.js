@@ -1213,11 +1213,17 @@ document.querySelectorAll('input[type="file"]').forEach((input) => {
         }
 
         // -- PUT a S3 con los mismos headers firmados --
-        const up = await fetch(presign.url, {
-          method: "PUT",
-          headers: { "Content-Type": mime },
-          body: file
-        });
+        const headers = { "Content-Type": mime, ...(presign.sse || {}) };
+let body = file;
+
+// If presign requires checksum, add CRC32 header
+if (/[?&]x-amz-checksum-algorithm=CRC32\b/.test(presign.url)) {
+  const buf = await file.arrayBuffer();
+  headers["x-amz-checksum-crc32"] = crc32Base64FromArrayBuffer(buf);
+  body = buf; // Keep body consistent with computed CRC
+}
+
+const up = await fetch(presign.url, { method: "PUT", headers, body });
 
         if (!up.ok) {
           console.error("S3 upload failed", up.status, await up.text().catch(() => ""));
