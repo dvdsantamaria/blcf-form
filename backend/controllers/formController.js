@@ -10,6 +10,7 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import FormSubmission from "../models/FormSubmission.js";
 import FormDraft from "../models/FormDraft.js";
 import { sendSubmissionMail } from "../utils/mailer.js";
+
 import { logAudit } from "../utils/logAudit.js";
 
 // AWS
@@ -20,6 +21,7 @@ const s3 = new S3Client({
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
   },
 });
+
 const BUCKET = process.env.AWS_S3_BUCKET || process.env.AWS_BUCKET_NAME;
 const kmsParams = process.env.AWS_KMS_KEY_ID
   ? { ServerSideEncryption: "aws:kms", SSEKMSKeyId: process.env.AWS_KMS_KEY_ID }
@@ -189,37 +191,61 @@ export const handleFormSubmission = async (req, res) => {
         ? emailRaw.trim()
         : null;
 
-    const finalKey = `submissions/${token}/final/submission.json`;
     const fileKeys = extractFileKeysFromBody(body);
     const { childFirst, childLast } = pickChildNameFromBody(body);
 
+    // Create or load submission to get submissionNumber from pre-save hook
+    let submission = await FormSubmission.findOne({ submissionId: token });
+
+    if (!submission) {
+      submission = new FormSubmission({
+        submissionId: token,
+        status: "submitted",
+        fileKeys,
+        ...(patientEmail ? { email: patientEmail } : {}),
+        ...(childFirst ? { childFirst } : {}),
+        ...(childLast ? { childLast } : {}),
+        lastActivityAt: now,
+        createdAt: now,
+      });
+      await submission.save(); // generates submissionNumber in pre-save
+    } else {
+      submission.status = "submitted";
+      submission.fileKeys = fileKeys;
+      if (patientEmail) submission.email = patientEmail;
+      if (childFirst) submission.childFirst = childFirst;
+      if (childLast) submission.childLast = childLast;
+      submission.lastActivityAt = now;
+      await submission.save();
+    }
+
+    const submissionNumber = submission.submissionNumber;
+
+    // Build final S3 object including submissionNumber
+    const finalKey = `submissions/${token}/final/submission.json`;
     const payload = {
       token,
+      submissionNumber,
       submittedAt: timestamp,
       schemaVersion: 1,
       data: body,
       fileKeys,
     };
 
-    console.log("[submit][begin]", { reqId, token, hasEmail: !!patientEmail });
+    console.log("[submit][begin]", {
+      reqId,
+      token,
+      hasEmail: !!patientEmail,
+      submissionNumber,
+    });
+
     await putJsonToS3(finalKey, payload, reqId);
 
-    await FormSubmission.findOneAndUpdate(
-      { submissionId: token },
-      {
-        $set: {
-          s3Key: finalKey,
-          status: "submitted",
-          fileKeys,
-          ...(patientEmail ? { email: patientEmail } : {}),
-          ...(childFirst ? { childFirst } : {}),
-          ...(childLast ? { childLast } : {}),
-          lastActivityAt: now,
-        },
-      },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
-    );
+    // Update s3Key after upload
+    submission.s3Key = finalKey;
+    await submission.save();
 
+    // Mark draft as finalized
     await FormDraft.findOneAndUpdate(
       { token },
       {
@@ -235,6 +261,7 @@ export const handleFormSubmission = async (req, res) => {
       { upsert: true }
     );
 
+    // Admin recipients
     const notifyRaw = [
       process.env.SUBMISSION_NOTIFY_TO || "",
       process.env.ADMIN_NOTIFY_TO || "",
@@ -252,10 +279,15 @@ export const handleFormSubmission = async (req, res) => {
 
     if (recipients.length) {
       const emailTasks = recipients.map((to) =>
-        sendSubmissionMail({ to, token, role: "admin", requestId: reqId })
+        sendSubmissionMail({
+          to,
+          role: "admin",
+          submissionNumber,
+          requestId: reqId,
+        })
       );
       const results = await Promise.all(emailTasks);
-      console.log("[submit][mails]", {
+      console.log("[submit][mails.admin]", {
         reqId,
         count: results.length,
         ids: results.map((r) => r?.id).filter(Boolean),
@@ -266,8 +298,20 @@ export const handleFormSubmission = async (req, res) => {
       });
     }
 
-    console.log("✅ Submission saved:", token, "(reqId:", reqId + ")");
-    return res.status(200).json({ ok: true, token, s3Key: finalKey });
+    // Applicant email (if present)
+    if (patientEmail) {
+      await sendSubmissionMail({
+        to: patientEmail,
+        role: "user",
+        submissionNumber,
+        requestId: reqId,
+      });
+    }
+
+    console.log("✅ Submission saved:", token, submissionNumber, "(reqId:", reqId + ")");
+    return res
+      .status(200)
+      .json({ ok: true, token, submissionNumber, s3Key: finalKey });
   } catch (err) {
     console.error("❌ submit error:", { reqId, error: err?.message || err });
     return res.status(500).json({ ok: false, error: "Internal Server Error" });

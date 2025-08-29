@@ -10,6 +10,7 @@ function isAbsolute(url) {
   return /^https?:\/\//i.test(url);
 }
 
+// Legacy helper kept for compatibility. Not used anymore for submissions.
 function buildReaderLink(token) {
   const base = (process.env.PUBLIC_BASE_URL || "").replace(/\/$/, "");
   const readerPath = process.env.READER_PATH || "/?mode=reader";
@@ -118,39 +119,69 @@ export async function sendHtmlEmail({
     return { ok: false, error: e?.message || String(e) };
   }
 }
+
+/**
+ * Build a human readable submission number. Safe to share, not an access secret.
+ * Prefer passing submissionNumber from controller. This is a fallback.
+ */
+function makeSubmissionNumber(submissionNumber, requestId) {
+  if (submissionNumber) return String(submissionNumber);
+  const now = new Date();
+  const yyyymm = `${now.getUTCFullYear()}${String(
+    now.getUTCMonth() + 1
+  ).padStart(2, "0")}`;
+  const suffix = (requestId || Math.random().toString(36).slice(2))
+    .toString()
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .slice(-6)
+    .toUpperCase();
+  return `BL-${yyyymm}-${suffix}`;
+}
+
+/**
+ * Submission email without token or token links.
+ * New param: submissionNumber (string). If omitted, a safe fallback is generated.
+ * Param token is ignored here to keep backward compatibility in callers.
+ */
 export async function sendSubmissionMail({
   to,
-  token,
+  token, // ignored
   role = "user",
   requestId,
+  submissionNumber,
 }) {
-  const link = buildReaderLink(token);
+  const adminUrl = "https://grants.beyondlimitscf.org.au/admin/";
   const subject =
     role === "admin"
-      ? "BLCF – New grant application received"
-      : "BLCF – Your application has been submitted";
+      ? "BLCF: New grant application received"
+      : "BLCF: Your application has been submitted";
 
-  const html = `
-    <p>${
-      role === "admin"
-        ? "A new submission has been received."
-        : "Thank you for submitting your application."
-    }</p>
-    <p>You can view it here:</p>
-    <p><a href="${link}">${link}</a></p>
-    <p>Ref: <code>${token}</code></p>
-  `;
+  const ref = makeSubmissionNumber(submissionNumber, requestId);
 
-  const text = `${
+  // HTML bodies (no token, no reader links)
+  const html =
     role === "admin"
-      ? "A new submission has been received."
-      : "Thank you for submitting your application."
-  }
+      ? `
+        <p>A new submission has been received.</p>
+        <p>Submission number: <strong>${ref}</strong></p>
+        <p>Sign in to view it: <a href="${adminUrl}">${adminUrl}</a></p>
+      `
+      : `
+        <p>Thank you for submitting your application.</p>
+        <p>Submission number: <strong>${ref}</strong></p>
+        <p>Our team will review it and contact you by email.</p>
+      `;
 
-View it here:
-${link}
-
-Ref: ${token}
+  // Plain-text bodies
+  const text =
+    role === "admin"
+      ? `A new submission has been received.
+Submission number: ${ref}
+Sign in to view it: ${adminUrl}
+`
+      : `Thank you for submitting your application.
+Submission number: ${ref}
+Our team will review it and contact you by email.
 `;
 
   return sendHtmlEmail({
