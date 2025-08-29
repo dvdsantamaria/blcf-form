@@ -9,16 +9,10 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import FormSubmission from "../models/FormSubmission.js";
 import FormDraft from "../models/FormDraft.js";
-import { sendSubmissionMail, sendHtmlEmail } from "../utils/mailer.js";
-import ResumeToken from "../models/ResumeToken.js";
+import { sendSubmissionMail } from "../utils/mailer.js";
 import { logAudit } from "../utils/logAudit.js";
-import {
-  genToken,
-  PUBLIC_BASE_URL,
-  BACKEND_BASE_URL,
-} from "./resumeController.js";
 
-// ───────────────── AWS clients ─────────────────
+// AWS
 const s3 = new S3Client({
   region: process.env.AWS_REGION,
   credentials: {
@@ -32,7 +26,7 @@ const kmsParams = process.env.AWS_KMS_KEY_ID
   : {};
 const EMAIL_RX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-// ───────────────── Helpers ─────────────────
+// Helpers
 function getField(body, dottedPath) {
   if (!body) return undefined;
   if (Object.prototype.hasOwnProperty.call(body, dottedPath))
@@ -42,7 +36,7 @@ function getField(body, dottedPath) {
   }, body);
 }
 
-// Updated to handle single values or arrays of file keys
+// Extract file keys from payload (accept arrays or scalars)
 function extractFileKeysFromBody(body) {
   const keys = [];
   for (const [field, value] of Object.entries(body || {})) {
@@ -50,7 +44,7 @@ function extractFileKeysFromBody(body) {
     for (const v of candidates) {
       if (
         typeof v === "string" &&
-        /submissions\/.+\/uploads\/.+\.(pdf|png|jpe?g|webp|heic)$/i.test(v)
+        /submissions\/.+\/uploads\/.+\.(pdf|png|jpe?g|webp|heic|heif)$/i.test(v)
       ) {
         keys.push({ field, key: v });
       }
@@ -80,7 +74,7 @@ async function putJsonToS3(key, obj, reqId) {
   return key;
 }
 
-// ───────────────── SAVE DRAFT ─────────────────
+// SAVE DRAFT
 export const saveDraft = async (req, res) => {
   const reqId = req.requestId || "-";
   try {
@@ -94,6 +88,7 @@ export const saveDraft = async (req, res) => {
         : crypto.randomBytes(16).toString("base64url");
 
     const step = Number(body.step ?? 0) || 0;
+
     const emailRaw = getField(body, "parent1.email") || getField(body, "email");
     const email =
       typeof emailRaw === "string" && EMAIL_RX.test(emailRaw.trim())
@@ -105,6 +100,7 @@ export const saveDraft = async (req, res) => {
     const historyKey = `submissions/${token}/drafts/${isoName}.json`;
 
     const fileKeys = extractFileKeysFromBody(body);
+
     const draftPayload = {
       token,
       step,
@@ -114,12 +110,8 @@ export const saveDraft = async (req, res) => {
       fileKeys,
     };
 
-    console.log("[save-draft][begin]", {
-      reqId,
-      token,
-      step,
-      hasEmail: !!email,
-    });
+    console.log("[save-draft][begin]", { reqId, token, step, hasEmail: !!email });
+
     await putJsonToS3(currentKey, draftPayload, reqId);
     await putJsonToS3(historyKey, draftPayload, reqId);
 
@@ -138,83 +130,16 @@ export const saveDraft = async (req, res) => {
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
-    const expiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
-    let rtDoc = await ResumeToken.findOne({
-      submissionId: token,
-      used: false,
-    });
-
-    if (rtDoc) {
-      await ResumeToken.updateOne(
-        { submissionId: token, used: false },
-        { expiresAt }
-      );
-      console.log("[save-draft][resume-token-extend]", { reqId, token });
-    }
-
-    const throttleHrs = Number(process.env.RESUME_EMAIL_THROTTLE_HOURS) || 24;
-    const throttleMs = throttleHrs * 3600 * 1000;
-    const draftRecord = await FormDraft.findOne({ token }).lean();
-    const lastSent = draftRecord?.lastResumeEmailAt
-      ? new Date(draftRecord.lastResumeEmailAt).getTime()
-      : 0;
-    const shouldSend = email && Date.now() - lastSent > throttleMs;
-
-    if (shouldSend) {
-      const rt = rtDoc?.resumeToken || genToken(24);
-      if (!rtDoc) {
-        await ResumeToken.create({
-          resumeToken: rt,
-          submissionId: token,
-          email,
-          expiresAt,
-        });
-      }
-
-      const base = BACKEND_BASE_URL || PUBLIC_BASE_URL || "";
-      const exchangeUrl = `${base}/api/resume/exchange?rt=${encodeURIComponent(
-        rt
-      )}`;
-      const subject = "Resume your application";
-      const text = `Hello,\n\nUse this secure link (valid 14 days) to resume your application:\n\n${exchangeUrl}\n\nIf you did not request this, ignore this email.`;
-      const html = `<p>Hello,</p>
-        <p>Use this secure link (valid 14 days) to resume your application:</p>
-        <p><a href="${exchangeUrl}">${exchangeUrl}</a></p>
-        <p>If you did not request this, ignore this email.</p>`;
-
-      const mail = await sendHtmlEmail({
-        to: email,
-        subject,
-        text,
-        html,
-        replyTo: process.env.REPLY_TO || undefined,
-        kind: "resume-link",
-        requestId: reqId,
-      });
-      console.log("[save-draft][resume-link-sent]", {
-        reqId,
-        email,
-        ok: mail.ok,
-        id: mail.id,
-      });
-
-      await FormDraft.updateOne(
-        { token },
-        { $set: { lastResumeEmailAt: new Date(), lastResumeEmailTo: email } }
-      );
-    }
 
     console.log("✅ Draft saved:", token, "(reqId:", reqId + ")");
     return res.status(200).json({ ok: true, token, s3Key: currentKey, step });
   } catch (err) {
     console.error("save draft error:", { reqId, error: err?.message || err });
-    return res
-      .status(500)
-      .json({ ok: false, error: "Internal Server Error" });
+    return res.status(500).json({ ok: false, error: "Internal Server Error" });
   }
 };
 
-// ───────────────── SUBMIT (FINAL) ─────────────────
+// SUBMIT (FINAL)
 export const handleFormSubmission = async (req, res) => {
   const reqId = req.requestId || "-";
   try {
@@ -244,11 +169,7 @@ export const handleFormSubmission = async (req, res) => {
       fileKeys,
     };
 
-    console.log("[submit][begin]", {
-      reqId,
-      token,
-      hasEmail: !!patientEmail,
-    });
+    console.log("[submit][begin]", { reqId, token, hasEmail: !!patientEmail });
     await putJsonToS3(finalKey, payload, reqId);
 
     await FormSubmission.findOneAndUpdate(
@@ -293,14 +214,9 @@ export const handleFormSubmission = async (req, res) => {
 
     console.log("[submit][notify]", { reqId, notifyRaw, recipients });
 
-    if (recipients.length) {
+    if (receptors.length) {
       const emailTasks = recipients.map((to) =>
-        sendSubmissionMail({
-          to,
-          token,
-          role: "admin",
-          requestId: reqId,
-        })
+        sendSubmissionMail({ to, token, role: "admin", requestId: reqId })
       );
       const results = await Promise.all(emailTasks);
       console.log("[submit][mails]", {
@@ -309,22 +225,20 @@ export const handleFormSubmission = async (req, res) => {
         ids: results.map((r) => r?.id).filter(Boolean),
       });
     } else {
-      console.warn(
-        "[submit][notify] no recipients configured; skipping email",
-        { reqId }
-      );
+      console.warn("[submit][notify] no recipients configured; skipping email", {
+        reqId,
+      });
     }
 
     console.log("✅ Submission saved:", token, "(reqId:", reqId + ")");
     return res.status(200).json({ ok: true, token, s3Key: finalKey });
   } catch (err) {
     console.error("❌ submit error:", { reqId, error: err?.message || err });
-    return res
-      .status(500)
-      .json({ ok: false, error: "Internal Server Error" });
+    return res.status(500).json({ ok: false, error: "Internal Server Error" });
   }
 };
-// ───────────────── PRESIGNED URL (PUT) ─────────────────
+
+// PRESIGNED URL (PUT)
 export const generateUploadUrl = async (req, res) => {
   const reqId = req.requestId || "-";
   try {
@@ -333,47 +247,49 @@ export const generateUploadUrl = async (req, res) => {
       return res.status(400).json({ ok: false, error: "Missing parameters" });
     }
 
-    // --- construir key ---
     const extFromFilename = filename ? filename.split(".").pop() : null;
     const extFromType = type && type.includes("/") ? type.split("/")[1] : null;
     const ext = (extFromFilename || extFromType || "bin")
-      .toLowerCase().replace(/[^a-z0-9]/g, "");
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, "");
 
     const safeField = (field || "file")
-      .toLowerCase().replace(/[^a-z0-9_.-]/g, "_");
+      .toLowerCase()
+      .replace(/[^a-z0-9_.-]/g, "_");
 
     const iso = new Date().toISOString().replace(/[-:.TZ]/g, "");
     const key = `submissions/${token}/uploads/${iso}_${safeField}.${ext}`;
 
     console.log("[S3][presign-put]", { reqId, token, key, contentType: type });
 
-    // 👉  volvemos a incluir kmsParams  👈
     const url = await getSignedUrl(
       s3,
       new PutObjectCommand({
         Bucket: BUCKET,
         Key: key,
         ContentType: type,
-        ...kmsParams            // ← firma los encabezados SSE-KMS
+        ...kmsParams,
       }),
       { expiresIn: 3600 }
     );
 
-    // devolvemos los encabezados que el front-end DEBE reenviar
     const sseHeaders = {
       "x-amz-server-side-encryption": "aws:kms",
-      "x-amz-server-side-encryption-aws-kms-key-id": process.env.AWS_KMS_KEY_ID
+      "x-amz-server-side-encryption-aws-kms-key-id":
+        process.env.AWS_KMS_KEY_ID,
     };
 
     return res.json({ ok: true, url, key, sse: sseHeaders });
   } catch (err) {
-    console.error("generateUploadUrl error:", { reqId, error: err?.message || err });
+    console.error("generateUploadUrl error:", {
+      reqId,
+      error: err?.message || err,
+    });
     return res.status(500).json({ ok: false, error: "Internal Server Error" });
   }
 };
 
-
-// ───────────────── PRESIGNED URL (GET) ─────────────────
+// PRESIGNED URL (GET)
 export const getFileUrl = async (req, res) => {
   const reqId = req.requestId || "-";
   try {
@@ -387,11 +303,7 @@ export const getFileUrl = async (req, res) => {
       { expiresIn: 60 }
     );
     console.log("[S3][presign-get]", { reqId, key, ttl: 60 });
-    await logAudit(req, {
-      action: "presign-get",
-      key,
-      httpStatus: 200,
-    });
+    await logAudit(req, { action: "presign-get", key, httpStatus: 200 });
     return res.json({ ok: true, url });
   } catch (err) {
     console.error("getFileUrl error:", { reqId, error: err?.message || err });
@@ -405,7 +317,7 @@ export const getFileUrl = async (req, res) => {
   }
 };
 
-// ───────────────── VIEW DATA (reader) ─────────────────
+// VIEW DATA
 export const getViewData = async (req, res) => {
   const reqId = req.requestId || "-";
   try {
@@ -413,7 +325,6 @@ export const getViewData = async (req, res) => {
     if (!token)
       return res.status(400).json({ ok: false, error: "Missing token" });
 
-    // 1) Final
     const finalKey = `submissions/${token}/final/submission.json`;
     try {
       const obj = await s3.send(
@@ -426,7 +337,7 @@ export const getViewData = async (req, res) => {
         action: "view-data",
         key: finalKey,
         httpStatus: 200,
-        extra: { type: "submitted" }
+        extra: { type: "submitted" },
       });
       return res.json({
         ok: true,
@@ -440,7 +351,6 @@ export const getViewData = async (req, res) => {
       // fallback to draft
     }
 
-    // 2) Draft
     const draftKey = `submissions/${token}/drafts/current.json`;
     const obj = await s3.send(
       new GetObjectCommand({ Bucket: BUCKET, Key: draftKey })
@@ -452,7 +362,7 @@ export const getViewData = async (req, res) => {
       action: "view-data",
       key: draftKey,
       httpStatus: 200,
-      extra: { type: "draft", step: json.step }
+      extra: { type: "draft", step: json.step },
     });
     return res.json({
       ok: true,
@@ -467,9 +377,11 @@ export const getViewData = async (req, res) => {
     console.error("getViewData error:", { reqId, error: err?.message || err });
     await logAudit(req, {
       action: "view-data",
-      key: req.query?.token ? `submissions/${req.query.token}/(final|draft)` : null,
+      key: req.query?.token
+        ? `submissions/${req.query.token}/(final|draft)`
+        : null,
       httpStatus: 404,
-      extra: { error: err?.message || String(err) }
+      extra: { error: err?.message || String(err) },
     });
     return res.status(404).json({ ok: false, error: "Not found" });
   }

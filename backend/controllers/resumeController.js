@@ -5,9 +5,9 @@ import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 
 import ResumeToken from "../models/ResumeToken.js";
 import FormDraft from "../models/FormDraft.js";
-import { sendHtmlEmail } from "../utils/mailer.js"; // use Resend SDK util
+import { sendHtmlEmail } from "../utils/mailer.js";
 
-/* ---------- AWS S3 ---------- */
+/* AWS S3 client */
 const s3 = new S3Client({
   region: process.env.AWS_REGION,
   credentials: process.env.AWS_ACCESS_KEY_ID
@@ -18,8 +18,7 @@ const s3 = new S3Client({
     : undefined,
 });
 
-/* ---------- Utils ---------- */
-// export genToken so formController can import it
+/* Utils */
 export function genToken(len = 24) {
   return crypto.randomBytes(len).toString("base64url");
 }
@@ -28,15 +27,13 @@ function isEmail(s) {
   return typeof s === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
 }
 
-// export streamToString if ever needed elsewhere
 export async function streamToString(stream) {
   const chunks = [];
   for await (const chunk of stream) chunks.push(chunk);
   return Buffer.concat(chunks).toString("utf-8");
 }
 
-/* ---------- Const ---------- */
-// export these so formController can build links
+/* Public base urls (trim trailing slash) */
 export const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || "").replace(
   /\/$/,
   ""
@@ -46,7 +43,7 @@ export const BACKEND_BASE_URL = (process.env.BACKEND_BASE_URL || "").replace(
   ""
 );
 
-// keep S3_BUCKET internal
+/* Internal */
 const S3_BUCKET =
   process.env.S3_BUCKET || process.env.AWS_S3_BUCKET || process.env.BUCKET_NAME;
 
@@ -54,7 +51,10 @@ const S3_BUCKET =
    CONTROLLERS
    ======================== */
 
-/* POST /api/resume/send-link */
+/**
+ * POST /api/resume/send-link
+ * Reuse active token for (submissionId,email) or create one and email it.
+ */
 export async function sendResumeLink(req, res) {
   const reqId = req.requestId || "-";
   try {
@@ -68,14 +68,30 @@ export async function sendResumeLink(req, res) {
     if (!draft)
       return res.status(404).json({ ok: false, error: "Draft not found" });
 
-    const rt = genToken(24);
     const expiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
-    await ResumeToken.create({
-      resumeToken: rt,
+
+    // Reuse existing active token or create a new one
+    const existing = await ResumeToken.findOne({
       submissionId: token,
       email,
-      expiresAt,
-    });
+      used: false,
+    }).lean();
+
+    const rt = existing?.resumeToken || genToken(24);
+
+    if (existing) {
+      await ResumeToken.updateOne(
+        { _id: existing._id },
+        { $set: { expiresAt } }
+      );
+    } else {
+      await ResumeToken.create({
+        resumeToken: rt,
+        submissionId: token,
+        email,
+        expiresAt,
+      });
+    }
 
     const base = BACKEND_BASE_URL || PUBLIC_BASE_URL || "";
     const exchangeUrl = `${base}/api/resume/exchange?rt=${encodeURIComponent(
@@ -85,6 +101,7 @@ export async function sendResumeLink(req, res) {
     const subject = "Resume your application";
     const text = `Hello,
 
+Use this secure link (valid for 14 days) to resume your application:
 
 ${exchangeUrl}
 
@@ -109,7 +126,15 @@ If you did not request this, please ignore this email.`;
 
     await FormDraft.findOneAndUpdate(
       { token },
-      { $set: { email, lastActivityAt: new Date(), lastEmailStatus: mail } },
+      {
+        $set: {
+          email,
+          lastActivityAt: new Date(),
+          lastEmailStatus: mail,
+          lastResumeEmailAt: new Date(),
+          lastResumeEmailTo: email,
+        },
+      },
       { upsert: true }
     );
 
@@ -122,15 +147,15 @@ If you did not request this, please ignore this email.`;
 
     return res.json({ ok: true, mail, exchangeUrl });
   } catch (err) {
-    console.error("sendResumeLink error:", {
-      reqId,
-      error: err?.message || err,
-    });
+    console.error("sendResumeLink error:", { reqId, error: err?.message || err });
     return res.status(500).json({ ok: false, error: "Internal Server Error" });
   }
 }
 
-/* GET /api/resume/exchange */
+/**
+ * GET /api/resume/exchange
+ * Validate token, mark as used, set cookie, respond JSON or redirect.
+ */
 export async function exchangeResumeToken(req, res) {
   try {
     const { rt } = req.query || {};
@@ -144,7 +169,6 @@ export async function exchangeResumeToken(req, res) {
 
     await ResumeToken.updateOne({ resumeToken: rt }, { $set: { used: true } });
 
-    // siempre set cookie (útil para navegación clásica)
     res.cookie("resume", doc.submissionId, {
       httpOnly: true,
       secure: true,
@@ -153,16 +177,13 @@ export async function exchangeResumeToken(req, res) {
       path: "/",
     });
 
-    // decide respuesta: JSON (fetch) o redirect (navegación normal)
     const wantsJson =
       req.xhr ||
       (req.headers.accept && req.headers.accept.includes("application/json")) ||
       req.headers["sec-fetch-mode"] === "cors" ||
       req.query.json === "1";
 
-    if (wantsJson) {
-      return res.json({ ok: true, token: doc.submissionId });
-    }
+    if (wantsJson) return res.json({ ok: true, token: doc.submissionId });
 
     const redirectTo = PUBLIC_BASE_URL ? `${PUBLIC_BASE_URL}/?resumed=1` : "/";
     return res.redirect(302, redirectTo);
@@ -171,7 +192,11 @@ export async function exchangeResumeToken(req, res) {
     return res.status(500).send("Internal Server Error");
   }
 }
-/* GET /api/resume/get-draft */
+
+/**
+ * GET /api/resume/get-draft
+ * Load current draft JSON from S3 using index in FormDraft.
+ */
 export async function getDraft(req, res) {
   const reqId = req.requestId || "-";
   try {
@@ -204,7 +229,10 @@ export async function getDraft(req, res) {
   }
 }
 
-/* GET /api/resume/whoami */
+/**
+ * GET /api/resume/whoami
+ * Return submission token from cookie if present.
+ */
 export async function whoAmI(req, res) {
   try {
     const token = req.cookies?.resume || null;
@@ -215,7 +243,10 @@ export async function whoAmI(req, res) {
   }
 }
 
-/* POST /api/resume/logout */
+/**
+ * POST /api/resume/logout
+ * Clear resume cookie.
+ */
 export async function logout(req, res) {
   try {
     res.clearCookie("resume", { path: "/" });
