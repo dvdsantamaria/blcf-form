@@ -1164,7 +1164,6 @@ function crc32Base64FromArrayBuffer(buf) {
   for (let i = 0; i < be.length; i++) bin += String.fromCharCode(be[i]);
   return btoa(bin);
 }
-
 /* --- Upload multi-archivo (hasta 5) --- */
 document.querySelectorAll('input[type="file"]').forEach((input) => {
   input.addEventListener("change", async () => {
@@ -1233,18 +1232,13 @@ document.querySelectorAll('input[type="file"]').forEach((input) => {
           presign = await getSignedUrlFlexible(fieldName, token, mime);
         }
 
-        // Calcular CRC32 y enviarlo a S3 (la URL presignada anuncia checksum CRC32)
-        const buf = await file.arrayBuffer();
-        const crc32b64 = crc32Base64FromArrayBuffer(buf);
-
+        // Upload directo – sin checksum ni headers adicionales
         const up = await fetch(presign.url, {
           method: "PUT",
           headers: {
-            "Content-Type": mime,
-            "x-amz-checksum-crc32": crc32b64
-            // No enviar headers de KMS aquí: ya están firmados en la URL
+            "Content-Type": mime
           },
-          body: new Blob([buf], { type: mime })
+          body: file
         });
 
         if (!up.ok) {
