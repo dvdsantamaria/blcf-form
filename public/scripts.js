@@ -1214,7 +1214,6 @@ document.querySelectorAll('input[type="file"]').forEach((input) => {
       try {
         const token = await ensureToken();
 
-        // 1) try canonical endpoint
         let presign;
         try {
           const r = await fetch(
