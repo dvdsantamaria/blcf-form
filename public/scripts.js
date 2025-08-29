@@ -1113,126 +1113,164 @@ async function ensureToken() {
   _tokenPromise = make().finally(() => (_tokenPromise = null));
   return _tokenPromise;
 }
-
-  function validateDraftMin() {
-    const missing = [];
-    let firstInvalid = null;
-    ["parent1.firstName", "parent1.mobile", "parent1.email"].forEach((name) => {
-      const el = document.querySelector(`[name="${name}"]`);
-      if (!el) return;
-      const v = (el.value || "").trim();
-      const ok = name === "parent1.email" ? isEmail(v) : v.length > 0;
-      if (!ok) {
-        missing.push(name);
-        el.classList.add("is-invalid");
-        firstInvalid ||= el;
-      }
-    });
-    if (missing.length) {
-      showToast("Please complete: First name, Mobile, Email to save your draft.");
-      firstInvalid?.focus();
-      return false;
+function validateDraftMin() {
+  const missing = [];
+  let firstInvalid = null;
+  ["parent1.firstName", "parent1.mobile", "parent1.email"].forEach((name) => {
+    const el = document.querySelector(`[name="${name}"]`);
+    if (!el) return;
+    const v = (el.value || "").trim();
+    const ok = name === "parent1.email" ? isEmail(v) : v.length > 0;
+    if (!ok) {
+      missing.push(name);
+      el.classList.add("is-invalid");
+      firstInvalid ||= el;
     }
-    return true;
+  });
+  if (missing.length) {
+    showToast("Please complete: First name, Mobile, Email to save your draft.");
+    firstInvalid?.focus();
+    return false;
   }
+  return true;
+}
 
-  // --- Upload multi-archivo (hasta 5) ---
-  document.querySelectorAll('input[type="file"]').forEach((input) => {
-    input.addEventListener("change", async () => {
-      let files = Array.from(input.files || []);
-      if (!files.length) return;
-  
-      const existing = getExistingKeys(input);
-      const remaining = Math.max(0, MAX_FILES_PER_FIELD - existing.length);
-      if (remaining <= 0) {
-        showToast(`You already have ${MAX_FILES_PER_FIELD} files uploaded for this field.`);
+/* ---- Util: CRC32 -> base64 (formato que espera S3) ---- */
+function crc32Base64FromArrayBuffer(buf) {
+  const table = (function () {
+    const t = new Uint32Array(256);
+    for (let i = 0; i < 256; i++) {
+      let c = i;
+      for (let j = 0; j < 8; j++) {
+        c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+      }
+      t[i] = c >>> 0;
+    }
+    return t;
+  })();
+  let crc = 0 ^ (-1);
+  const view = new Uint8Array(buf);
+  for (let i = 0; i < view.length; i++) {
+    crc = (crc >>> 8) ^ table[(crc ^ view[i]) & 0xFF];
+  }
+  crc = (crc ^ (-1)) >>> 0;
+  // big-endian + base64
+  const be = new Uint8Array(4);
+  be[0] = (crc >>> 24) & 0xFF;
+  be[1] = (crc >>> 16) & 0xFF;
+  be[2] = (crc >>> 8) & 0xFF;
+  be[3] = crc & 0xFF;
+  let bin = "";
+  for (let i = 0; i < be.length; i++) bin += String.fromCharCode(be[i]);
+  return btoa(bin);
+}
+
+/* --- Upload multi-archivo (hasta 5) --- */
+document.querySelectorAll('input[type="file"]').forEach((input) => {
+  input.addEventListener("change", async () => {
+    let files = Array.from(input.files || []);
+    if (!files.length) return;
+
+    const existing = getExistingKeys(input);
+    const remaining = Math.max(0, MAX_FILES_PER_FIELD - existing.length);
+    if (remaining <= 0) {
+      showToast(`You already have ${MAX_FILES_PER_FIELD} files uploaded for this field.`);
+      input.value = "";
+      return;
+    }
+    if (files.length > remaining) {
+      files = files.slice(0, remaining);
+      showToast(
+        `You can add ${remaining} more file${remaining > 1 ? "s" : ""} (max ${MAX_FILES_PER_FIELD} total).`
+      );
+    }
+
+    const fieldName = input.name;
+    const mimeMap = {
+      pdf: "application/pdf",
+      jpg: "image/jpeg",
+      jpeg: "image/jpeg",
+      png: "image/png",
+      webp: "image/webp",
+      heic: "image/heic",
+      heif: "image/heic",
+    };
+    const newKeys = [];
+
+    for (const file of files) {
+      if (file.size > MAX_FILE_BYTES) {
+        showToast(`Each file must be <= ${MAX_FILE_MB} MB.`);
+        continue; // skip this file, allow smaller ones
+      }
+
+      const ext = (file.name.split(".").pop() || "").toLowerCase();
+      const mime = file.type || mimeMap[ext] || "";
+      if (!mime) {
+        showToast("Unsupported file type.");
         input.value = "";
         return;
       }
-      if (files.length > remaining) {
-        files = files.slice(0, remaining);
-        showToast(
-          `You can add ${remaining} more file${remaining > 1 ? "s" : ""} (max ${MAX_FILES_PER_FIELD} total).`
-        );
-      }
-  
-      const fieldName = input.name;
-      const mimeMap = {
-        pdf: "application/pdf",
-        jpg: "image/jpeg",
-        jpeg: "image/jpeg",
-        png: "image/png",
-        webp: "image/webp",
-        heic: "image/heic",
-        heif: "image/heic",
-      };
-      const newKeys = [];
-  
-      for (const file of files) {
-        if (file.size > MAX_FILE_BYTES) {
-          showToast(`Each file must be <= ${MAX_FILE_MB} MB.`);
-          continue; // skip this file, allow smaller ones
-        }
-  
-        const ext = (file.name.split(".").pop() || "").toLowerCase();
-        const mime = file.type || mimeMap[ext] || "";
-        if (!mime) {
-          showToast("Unsupported file type.");
-          input.value = "";
-          return;
-        }
-  
+
+      try {
+        const token = await ensureToken();
+
+        // intento consistente primero
+        let presign;
         try {
-          const token = await ensureToken();
-  
-          // intento consistente primero
-          let presign;
-          try {
-            const r = await fetch(
-              `${API_BASE}/form/generate-upload-url?field=${encodeURIComponent(
-                fieldName
-              )}&token=${encodeURIComponent(token)}&type=${encodeURIComponent(
-                mime
-              )}`,
-              { headers: { Accept: "application/json" } }
-            );
-            if (r.ok) presign = await r.json();
-          } catch {}
-  
-          // si falla, uso flexible
-          if (!presign || !presign.url || !presign.key) {
-            presign = await getSignedUrlFlexible(fieldName, token, mime);
-          }
-  
-          const up = await fetch(presign.url, {
-            method: "PUT",
-            headers: {
-              "Content-Type": mime,
-              ...(presign.sse || {}), // incluir headers KMS si el backend los envía
-            },
-            body: file,
-          });
-          if (!up.ok) throw new Error("Upload failed");
-          newKeys.push(presign.key);
-        } catch (err) {
-          console.error(err);
-          showToast("Upload error.");
-          input.value = "";
-          return;
+          const r = await fetch(
+            `${API_BASE}/form/generate-upload-url?field=${encodeURIComponent(
+              fieldName
+            )}&token=${encodeURIComponent(token)}&type=${encodeURIComponent(
+              mime
+            )}`,
+            { headers: { Accept: "application/json" } }
+          );
+          if (r.ok) presign = await r.json();
+        } catch {}
+
+        // si falla, uso flexible
+        if (!presign || !presign.url || !presign.key) {
+          presign = await getSignedUrlFlexible(fieldName, token, mime);
         }
+
+        // Calcular CRC32 y enviarlo a S3 (la URL presignada anuncia checksum CRC32)
+        const buf = await file.arrayBuffer();
+        const crc32b64 = crc32Base64FromArrayBuffer(buf);
+
+        const up = await fetch(presign.url, {
+          method: "PUT",
+          headers: {
+            "Content-Type": mime,
+            "x-amz-checksum-crc32": crc32b64
+            // No enviar headers de KMS aquí: ya están firmados en la URL
+          },
+          body: new Blob([buf], { type: mime })
+        });
+
+        if (!up.ok) {
+          console.error("S3 upload failed", up.status, await up.text().catch(() => ""));
+          throw new Error("Upload failed");
+        }
+        newKeys.push(presign.key);
+      } catch (err) {
+        console.error(err);
+        showToast("Upload error.");
+        input.value = "";
+        return;
       }
-  
-      if (newKeys.length) {
-        const merged = [...existing, ...newKeys];
-        setKeys(input, merged); // persiste dataset + render
-        showToast("Files uploaded.");
-      }
-  
-      // limpiar selección del input (permite re-subir mismo nombre)
-      input.value = "";
-    });
+    }
+
+    if (newKeys.length) {
+      const merged = [...existing, ...newKeys];
+      setKeys(input, merged); // persiste dataset + render
+      showToast("Files uploaded.");
+    }
+
+    // limpiar selección del input (permite re-subir mismo nombre)
+    input.value = "";
   });
-  
+});
+
 // --- Guardar borrador (single-flight, sin duplicados) ---
 let _savingDraft = false;
 let _savingPromise = null;
@@ -1243,7 +1281,6 @@ window.saveStep = async function saveStep() {
 
   const formEl = document.getElementById("grantForm");
   const saveButton = document.getElementById("saveDraftBtn");
-
   // lock UI
   let originalText;
   if (saveButton) {
