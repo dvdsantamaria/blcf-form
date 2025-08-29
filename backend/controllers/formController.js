@@ -363,7 +363,18 @@ export const generateUploadUrl = async (req, res) => {
       }),
       { expiresIn: 3600 }
     );
-    return res.status(200).json({ ok: true, url, key });
+
+    // headers SSE-KMS que el cliente debe enviar en el PUT
+    const sse =
+      process.env.AWS_KMS_KEY_ID
+        ? {
+            "x-amz-server-side-encryption": "aws:kms",
+            "x-amz-server-side-encryption-aws-kms-key-id":
+              process.env.AWS_KMS_KEY_ID,
+          }
+        : undefined;
+
+    return res.status(200).json({ ok: true, url, key, sse });
   } catch (err) {
     console.error("generateUploadUrl error:", {
       reqId,

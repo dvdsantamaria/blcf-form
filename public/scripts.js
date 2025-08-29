@@ -1169,12 +1169,11 @@ async function ensureToken() {
       const newKeys = [];
   
       for (const file of files) {
-
         if (file.size > MAX_FILE_BYTES) {
-               showToast(`Each file must be <= ${MAX_FILE_MB} MB.`);
-               continue; // skip this file, allow smaller ones
-             }
-
+          showToast(`Each file must be <= ${MAX_FILE_MB} MB.`);
+          continue; // skip this file, allow smaller ones
+        }
+  
         const ext = (file.name.split(".").pop() || "").toLowerCase();
         const mime = file.type || mimeMap[ext] || "";
         if (!mime) {
@@ -1207,7 +1206,10 @@ async function ensureToken() {
   
           const up = await fetch(presign.url, {
             method: "PUT",
-            headers: { "Content-Type": mime },
+            headers: {
+              "Content-Type": mime,
+              ...(presign.sse || {}), // incluir headers KMS si el backend los envía
+            },
             body: file,
           });
           if (!up.ok) throw new Error("Upload failed");
@@ -1230,7 +1232,7 @@ async function ensureToken() {
       input.value = "";
     });
   });
-
+  
 // --- Guardar borrador (single-flight, sin duplicados) ---
 let _savingDraft = false;
 let _savingPromise = null;
